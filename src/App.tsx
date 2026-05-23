@@ -1962,11 +1962,6 @@ function parseToner(line: string): { K: string; C: string; M: string; Y: string 
   return { K: normToken(m[1]), C: normToken(m[2]), M: normToken(m[3]), Y: normToken(m[4]) };
 }
 
-function parseWaste(line: string): string {
-  const m = line.match(/^폐통\s*:\s*(\S*?)\s*%/);
-  return m ? normToken(m[1]) : "";
-}
-
 function parseSpare(line: string): { K: string; C: string; M: string; Y: string; waste: string } {
   const m = line.match(/^여분\s*:\s*K(\S*)\s+C(\S*)\s+M(\S*)\s+Y(\S*)\s+폐(\S*)/);
   if (!m) return { K: "", C: "", M: "", Y: "", waste: "" };
@@ -1980,6 +1975,8 @@ function parseValueAfterColon(line: string, label: string): string {
 }
 
 function mergeMailLine(line: string, f: PerItemForm): string {
+  const formHasAny = !!(f.mailBlack.trim() || f.mailColor.trim() || f.mailLargeColor.trim() || f.mailTotal.trim());
+  if (!formHasAny) return line;
   const p = parseMail(line);
   const black = f.mailBlack.trim() || p.black;
   const color = f.mailColor.trim() || p.color;
@@ -1989,6 +1986,8 @@ function mergeMailLine(line: string, f: PerItemForm): string {
 }
 
 function mergeTonerLine(line: string, f: PerItemForm): string {
+  const formHasAny = !!(f.tonerK.trim() || f.tonerC.trim() || f.tonerM.trim() || f.tonerY.trim());
+  if (!formHasAny) return line;
   const p = parseToner(line);
   const K = f.tonerK.trim() || p.K;
   const C = f.tonerC.trim() || p.C;
@@ -1998,11 +1997,13 @@ function mergeTonerLine(line: string, f: PerItemForm): string {
 }
 
 function mergeWasteLine(line: string, f: PerItemForm): string {
-  const value = f.waste.trim() || parseWaste(line);
-  return value ? `폐통: ${value}%` : "폐통:  %";
+  if (!f.waste.trim()) return line;
+  return `폐통: ${f.waste.trim()}%`;
 }
 
 function mergeSpareLine(line: string, f: PerItemForm): string {
+  const formHasAny = !!(f.spareK.trim() || f.spareC.trim() || f.spareM.trim() || f.spareY.trim() || f.spareWaste.trim());
+  if (!formHasAny) return line;
   const p = parseSpare(line);
   const K = f.spareK.trim() || p.K;
   const C = f.spareC.trim() || p.C;
