@@ -1996,27 +1996,11 @@ function mergeWasteLine(line: string, f: PerItemForm): string {
   return `폐통: ${f.waste.trim()}%`;
 }
 
-function mergeSpareLine(line: string, f: PerItemForm): string {
-  const formHasAny = !!(f.spareK.trim() || f.spareC.trim() || f.spareM.trim() || f.spareY.trim() || f.spareWaste.trim());
-  if (!formHasAny) return line;
-  const m = line.match(/^여분\s*:\s*K(\S*)\s+C(\S*)\s+M(\S*)\s+Y(\S*)\s+폐(\S*)(.*)$/);
-  const p = m
-    ? { K: normToken(m[1]), C: normToken(m[2]), M: normToken(m[3]), Y: normToken(m[4]), waste: normToken(m[5]) }
-    : { K: "", C: "", M: "", Y: "", waste: "" };
-  const trailing = m ? m[6] : "";
-  const K = f.spareK.trim() || p.K;
-  const C = f.spareC.trim() || p.C;
-  const M = f.spareM.trim() || p.M;
-  const Y = f.spareY.trim() || p.Y;
-  const waste = f.spareWaste.trim() || p.waste;
-  return `여분:  K${dashIfEmpty(K)} C${dashIfEmpty(C)} M${dashIfEmpty(M)} Y${dashIfEmpty(Y)} 폐${dashIfEmpty(waste)}${trailing}`;
-}
-
 // Replaces only the numeric value of a single channel marker in-place,
 // leaving prefixes (토너/드럼), separators, location notes, and unknown
-// tokens untouched. Used for 점검 mode where 여분 lines are free-form.
-// `aliases` lets one form field target multiple markers (e.g. K also
-// matches a bare 토너 on a mono printer that has no explicit K).
+// tokens untouched. Used for both 점검 and 미양식 since 여분 lines can
+// be free-form. `aliases` lets one form field target multiple markers
+// (e.g. K also matches a bare 토너 on a mono printer that has no K).
 function setChannelValue(line: string, aliases: string[], value: string): string {
   for (const letter of aliases) {
     const flags = /[A-Za-z]/.test(letter) ? "i" : "";
@@ -2042,7 +2026,12 @@ function mergeSpareInPlace(line: string, f: PerItemForm): string {
   if (f.spareM.trim()) result = setChannelValue(result, ["M"], f.spareM.trim());
   if (f.spareY.trim()) result = setChannelValue(result, ["Y"], f.spareY.trim());
   if (f.spareWaste.trim()) result = setChannelValue(result, ["폐"], f.spareWaste.trim());
-  if (f.spareDrum.trim()) result = setChannelValue(result, ["드럼"], f.spareDrum.trim());
+  if (f.spareDrum.trim()) {
+    const drumVal = f.spareDrum.trim();
+    const replaced = setChannelValue(result, ["드럼"], drumVal);
+    // No existing 드럼 marker (e.g. 미양식 placeholder) → append one.
+    result = replaced === result ? `${result} 드럼-${drumVal}` : replaced;
+  }
   return result;
 }
 
@@ -2050,8 +2039,7 @@ function applyProcessingFormV2(
   text: string,
   itemForms: PerItemForm[],
   shared: SharedForm,
-  author: string,
-  spareInPlace = false
+  author: string
 ): string {
   let itemIdx = -1;
   let section: "" | "parts" | "self" = "";
@@ -2082,7 +2070,7 @@ function applyProcessingFormV2(
       if (/^매수\s*:/.test(line)) return mergeMailLine(line, f);
       if (/^토너잔량\s*:/.test(line)) return mergeTonerLine(line, f);
       if (/^폐통\s*:/.test(line)) return mergeWasteLine(line, f);
-      if (/^여분\s*:/.test(line)) return spareInPlace ? mergeSpareInPlace(line, f) : mergeSpareLine(line, f);
+      if (/^여분\s*:/.test(line)) return mergeSpareInPlace(line, f);
       if (/^한틴이카유무\s*:/.test(line)) {
         const existing = parseValueAfterColon(line, "한틴이카유무");
         const v = f.hantin.trim() || existing;
@@ -3056,7 +3044,7 @@ export default function App() {
       return applyAirPurifierForm(textOutput, airForm, author);
     }
     if (mode === "inspection") {
-      return applyProcessingFormV2(textOutput, itemForms, sharedForm, author, true);
+      return applyProcessingFormV2(textOutput, itemForms, sharedForm, author);
     }
     return textOutput;
   }, [mode, textOutput, airForm, itemForms, sharedForm, author]);
@@ -3309,7 +3297,7 @@ export default function App() {
             setAuthor={setAuthor}
             showLevel={mode === "blank-report"}
             showHantinParking={mode === "blank-report"}
-            showDrum={mode === "inspection"}
+            showDrum={mode === "inspection" || mode === "blank-report"}
           />
         )}
 
