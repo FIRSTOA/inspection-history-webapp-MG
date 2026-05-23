@@ -1862,8 +1862,7 @@ function runSelfTests(): TestResult[] {
 // Processing form (미양식 mode) — manual entry for printer service details
 // ────────────────────────────────────────────────────────────────────────────
 
-type ProcessingForm = {
-  level: string;
+type PerItemForm = {
   processContent: string;
   mailBlack: string;
   mailColor: string;
@@ -1883,6 +1882,21 @@ type ProcessingForm = {
   parkingChip: string;
   parkingCustom: string;
   notes: string;
+};
+
+const EMPTY_ITEM_FORM: PerItemForm = {
+  processContent: "",
+  mailBlack: "", mailColor: "", mailLargeColor: "", mailTotal: "",
+  tonerK: "", tonerC: "", tonerM: "", tonerY: "",
+  waste: "",
+  spareK: "", spareC: "", spareM: "", spareY: "", spareWaste: "",
+  hantin: "",
+  parkingChip: "", parkingCustom: "",
+  notes: "",
+};
+
+type SharedForm = {
+  level: string;
   warranty: string;
   cumCount: string;
   expectedCount: string;
@@ -1897,16 +1911,8 @@ type ProcessingForm = {
   duration: string;
 };
 
-const EMPTY_FORM: ProcessingForm = {
+const EMPTY_SHARED_FORM: SharedForm = {
   level: "",
-  processContent: "",
-  mailBlack: "", mailColor: "", mailLargeColor: "", mailTotal: "",
-  tonerK: "", tonerC: "", tonerM: "", tonerY: "",
-  waste: "",
-  spareK: "", spareC: "", spareM: "", spareY: "", spareWaste: "",
-  hantin: "",
-  parkingChip: "", parkingCustom: "",
-  notes: "",
   warranty: "", cumCount: "", expectedCount: "",
   partName: "", partQty: "", partShipped: "",
   selfItem: "", selfQty: "", selfShipped: "",
@@ -1931,87 +1937,189 @@ const EMPTY_AIR_FORM: AirPurifierForm = {
   duration: "",
 };
 
-function dash(v: string): string {
-  return v.trim() ? v.trim() : "-";
-}
-
 function suffixIfValue(label: string, v: string): string {
   return v.trim() ? `${label} ${v.trim()}` : label;
 }
 
-function applyProcessingForm(text: string, f: ProcessingForm, author: string): string {
+function normToken(s: string): string {
+  return s === "-" ? "" : s;
+}
+
+function dashIfEmpty(s: string): string {
+  return s.trim() ? s.trim() : "-";
+}
+
+// Parses an existing "매수:흑X 컬X 큰컬X 합X" line into its 4 values
+function parseMail(line: string): { black: string; color: string; largeColor: string; total: string } {
+  const m = line.match(/^매수\s*:\s*흑(\S*)\s*컬(\S*)\s*큰컬(\S*)\s*합(\S*)/);
+  if (!m) return { black: "", color: "", largeColor: "", total: "" };
+  return { black: normToken(m[1]), color: normToken(m[2]), largeColor: normToken(m[3]), total: normToken(m[4]) };
+}
+
+function parseToner(line: string): { K: string; C: string; M: string; Y: string } {
+  const m = line.match(/^토너잔량\s*:\s*K(\S*)\s+C(\S*)\s+M(\S*)\s+Y(\S*)/);
+  if (!m) return { K: "", C: "", M: "", Y: "" };
+  return { K: normToken(m[1]), C: normToken(m[2]), M: normToken(m[3]), Y: normToken(m[4]) };
+}
+
+function parseWaste(line: string): string {
+  const m = line.match(/^폐통\s*:\s*(\S*?)\s*%/);
+  return m ? normToken(m[1]) : "";
+}
+
+function parseSpare(line: string): { K: string; C: string; M: string; Y: string; waste: string } {
+  const m = line.match(/^여분\s*:\s*K(\S*)\s+C(\S*)\s+M(\S*)\s+Y(\S*)\s+폐(\S*)/);
+  if (!m) return { K: "", C: "", M: "", Y: "", waste: "" };
+  return { K: normToken(m[1]), C: normToken(m[2]), M: normToken(m[3]), Y: normToken(m[4]), waste: normToken(m[5]) };
+}
+
+function parseValueAfterColon(line: string, label: string): string {
+  const re = new RegExp(`^${label}\\s*:\\s*(.*)$`);
+  const m = line.match(re);
+  return m ? m[1].trim() : "";
+}
+
+function mergeMailLine(line: string, f: PerItemForm): string {
+  const p = parseMail(line);
+  const black = f.mailBlack.trim() || p.black;
+  const color = f.mailColor.trim() || p.color;
+  const large = f.mailLargeColor.trim() || p.largeColor;
+  const total = f.mailTotal.trim() || p.total;
+  return `매수:흑${dashIfEmpty(black)} 컬${dashIfEmpty(color)} 큰컬${dashIfEmpty(large)} 합${dashIfEmpty(total)}`;
+}
+
+function mergeTonerLine(line: string, f: PerItemForm): string {
+  const p = parseToner(line);
+  const K = f.tonerK.trim() || p.K;
+  const C = f.tonerC.trim() || p.C;
+  const M = f.tonerM.trim() || p.M;
+  const Y = f.tonerY.trim() || p.Y;
+  return `토너잔량:K${dashIfEmpty(K)} C${dashIfEmpty(C)} M${dashIfEmpty(M)} Y${dashIfEmpty(Y)}`;
+}
+
+function mergeWasteLine(line: string, f: PerItemForm): string {
+  const value = f.waste.trim() || parseWaste(line);
+  return value ? `폐통: ${value}%` : "폐통:  %";
+}
+
+function mergeSpareLine(line: string, f: PerItemForm): string {
+  const p = parseSpare(line);
+  const K = f.spareK.trim() || p.K;
+  const C = f.spareC.trim() || p.C;
+  const M = f.spareM.trim() || p.M;
+  const Y = f.spareY.trim() || p.Y;
+  const waste = f.spareWaste.trim() || p.waste;
+  return `여분:  K${dashIfEmpty(K)} C${dashIfEmpty(C)} M${dashIfEmpty(M)} Y${dashIfEmpty(Y)} 폐${dashIfEmpty(waste)}`;
+}
+
+function applyProcessingFormV2(
+  text: string,
+  itemForms: PerItemForm[],
+  shared: SharedForm,
+  author: string
+): string {
+  let itemIdx = -1;
   let section: "" | "parts" | "self" = "";
-  const parkingValue = f.parkingCustom.trim() || f.parkingChip;
 
   return text.split("\n").map((line: string) => {
+    if (/^\s*\d+\.\s*$/.test(line)) {
+      itemIdx++;
+      section = "";
+      return line;
+    }
     if (/^※부품신청※/.test(line)) { section = "parts"; return line; }
     if (/^※자가신청※/.test(line)) { section = "self"; return line; }
 
+    // Header (shared)
     if (/^작성자\s*:/.test(line)) {
       return author.trim() ? line.replace(/^(작성자\s*:\s*).*/, `$1${author.trim()}`) : line;
     }
     if (/^레벨\s*:/.test(line)) {
-      return f.level.trim() ? line.replace(/^(레벨\s*:\s*).*/, `$1${f.level.trim()}`) : line;
+      return shared.level.trim() ? line.replace(/^(레벨\s*:\s*).*/, `$1${shared.level.trim()}`) : line;
     }
-    if (/^처리내용\s*:/.test(line)) {
-      return f.processContent.trim() ? `처리내용: ${f.processContent.trim()}` : line;
+
+    // Per-item fields
+    if (itemIdx >= 0 && itemIdx < itemForms.length) {
+      const f = itemForms[itemIdx];
+      if (/^처리내용\s*:/.test(line)) {
+        return f.processContent.trim() ? `처리내용: ${f.processContent.trim()}` : line;
+      }
+      if (/^매수\s*:/.test(line)) return mergeMailLine(line, f);
+      if (/^토너잔량\s*:/.test(line)) return mergeTonerLine(line, f);
+      if (/^폐통\s*:/.test(line)) return mergeWasteLine(line, f);
+      if (/^여분\s*:/.test(line)) return mergeSpareLine(line, f);
+      if (/^한틴이카유무\s*:/.test(line)) {
+        const existing = parseValueAfterColon(line, "한틴이카유무");
+        const v = f.hantin.trim() || existing;
+        return suffixIfValue("한틴이카유무:", v);
+      }
+      if (/^주차비지원유무\s*:/.test(line)) {
+        const existing = parseValueAfterColon(line, "주차비지원유무");
+        const parkingValue = f.parkingCustom.trim() || f.parkingChip || existing;
+        return suffixIfValue("주차비지원유무:", parkingValue);
+      }
+      if (/^특이사항\s*:/.test(line)) {
+        const existing = parseValueAfterColon(line, "특이사항");
+        const v = f.notes.trim() || existing;
+        return suffixIfValue("특이사항:", v);
+      }
     }
-    if (/^매수\s*:/.test(line)) {
-      return `매수:흑${dash(f.mailBlack)} 컬${dash(f.mailColor)} 큰컬${dash(f.mailLargeColor)} 합${dash(f.mailTotal)}`;
-    }
-    if (/^토너잔량\s*:/.test(line)) {
-      return `토너잔량:K${dash(f.tonerK)} C${dash(f.tonerC)} M${dash(f.tonerM)} Y${dash(f.tonerY)}`;
-    }
-    if (/^폐통\s*:/.test(line)) {
-      return f.waste.trim() ? `폐통: ${f.waste.trim()}%` : "폐통:  %";
-    }
-    if (/^여분\s*:/.test(line)) {
-      return `여분:  K${dash(f.spareK)} C${dash(f.spareC)} M${dash(f.spareM)} Y${dash(f.spareY)} 폐${dash(f.spareWaste)}`;
-    }
-    if (/^한틴이카유무\s*:/.test(line)) {
-      return suffixIfValue("한틴이카유무:", f.hantin);
-    }
-    if (/^주차비지원유무\s*:/.test(line)) {
-      return suffixIfValue("주차비지원유무:", parkingValue);
-    }
-    if (/^특이사항\s*:/.test(line)) {
-      return suffixIfValue("특이사항:", f.notes);
-    }
+
+    // Parts / self / footer (shared)
     if (/^보증기간 내 여부\s*:/.test(line)) {
-      return f.warranty.trim() ? `보증기간 내 여부 : ${f.warranty.trim()}` : "보증기간 내 여부 :";
+      const existing = parseValueAfterColon(line, "보증기간 내 여부");
+      const v = shared.warranty.trim() || existing;
+      return v ? `보증기간 내 여부 : ${v}` : "보증기간 내 여부 :";
     }
     if (/^교체 전 카운터 누적 사용매수\s*:/.test(line)) {
-      return f.cumCount.trim() ? `교체 전 카운터 누적 사용매수 : ${f.cumCount.trim()}` : "교체 전 카운터 누적 사용매수 :";
+      const existing = parseValueAfterColon(line, "교체 전 카운터 누적 사용매수");
+      const v = shared.cumCount.trim() || existing;
+      return v ? `교체 전 카운터 누적 사용매수 : ${v}` : "교체 전 카운터 누적 사용매수 :";
     }
     if (/^사용 부품 예상 사용매수\s*:/.test(line)) {
-      return f.expectedCount.trim() ? `사용 부품 예상 사용매수 : ${f.expectedCount.trim()}` : "사용 부품 예상 사용매수 :";
+      const existing = parseValueAfterColon(line, "사용 부품 예상 사용매수");
+      const v = shared.expectedCount.trim() || existing;
+      return v ? `사용 부품 예상 사용매수 : ${v}` : "사용 부품 예상 사용매수 :";
     }
     if (/^물품명\s*:/.test(line)) {
-      return suffixIfValue("물품명:", f.partName);
+      const existing = parseValueAfterColon(line, "물품명");
+      const v = shared.partName.trim() || existing;
+      return suffixIfValue("물품명:", v);
     }
     if (/^물품\s*:/.test(line) && section === "self") {
-      return suffixIfValue("물품:", f.selfItem);
+      const existing = parseValueAfterColon(line, "물품");
+      const v = shared.selfItem.trim() || existing;
+      return suffixIfValue("물품:", v);
     }
     if (/^수량\s*:/.test(line)) {
-      const v = section === "self" ? f.selfQty : f.partQty;
+      const existing = parseValueAfterColon(line, "수량");
+      const v = (section === "self" ? shared.selfQty.trim() : shared.partQty.trim()) || existing;
       return suffixIfValue("수량:", v);
     }
     if (/^출고여부\s*:/.test(line)) {
-      const v = section === "self" ? f.selfShipped : f.partShipped;
+      const existing = parseValueAfterColon(line, "출고여부");
+      const v = (section === "self" ? shared.selfShipped.trim() : shared.partShipped.trim()) || existing;
       return suffixIfValue("출고여부:", v);
     }
     if (/^도착 시간\s*:/.test(line)) {
-      const arrival = f.arrivalHour
-        ? `${f.arrivalHour}:${f.arrivalMinute || "00"}`
-        : "";
+      const existing = parseValueAfterColon(line, "도착 시간");
+      const arrival = shared.arrivalHour
+        ? `${shared.arrivalHour}:${shared.arrivalMinute || "00"}`
+        : existing;
       return suffixIfValue("도착 시간:", arrival);
     }
     if (/^소요 시간\s*:/.test(line)) {
-      const duration = f.duration.trim() ? `${f.duration.trim()}분` : "";
-      return suffixIfValue("소요 시간:", duration);
+      const existing = parseValueAfterColon(line, "소요 시간");
+      const v = shared.duration.trim() ? `${shared.duration.trim()}분` : existing;
+      return suffixIfValue("소요 시간:", v);
     }
     return line;
   }).join("\n");
+}
+
+function countInspectionItems(text: string): number {
+  if (!text) return 0;
+  return text.split("\n").filter((l: string) => /^\s*\d+\.\s*$/.test(l)).length;
 }
 
 function applyAirPurifierForm(text: string, f: AirPurifierForm, author: string): string {
@@ -2274,18 +2382,27 @@ function FieldRow({ label, dotColor, children }: FormFieldRowProps) {
 }
 
 type ProcessingFormPanelProps = {
-  form: ProcessingForm;
-  setF: <K extends keyof ProcessingForm>(key: K, value: ProcessingForm[K]) => void;
-  toggleF: (key: keyof ProcessingForm, value: string) => void;
+  itemForm: PerItemForm;
+  setItemF: <K extends keyof PerItemForm>(key: K, value: PerItemForm[K]) => void;
+  toggleItemF: (key: keyof PerItemForm, value: string) => void;
+  shared: SharedForm;
+  setSharedF: <K extends keyof SharedForm>(key: K, value: SharedForm[K]) => void;
+  itemCount: number;
+  selectedItem: number;
+  setSelectedItem: (i: number) => void;
   accent: string;
   bgSoft: string;
   author: string;
   setAuthor: (v: string) => void;
+  showLevel: boolean;
 };
 
 function ProcessingFormPanel({
-  form, setF, toggleF, accent, bgSoft,
-  author, setAuthor,
+  itemForm, setItemF, toggleItemF,
+  shared, setSharedF,
+  itemCount, selectedItem, setSelectedItem,
+  accent, bgSoft,
+  author, setAuthor, showLevel,
 }: ProcessingFormPanelProps) {
   const numInputClass =
     "w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white";
@@ -2300,7 +2417,7 @@ function ProcessingFormPanel({
       </div>
 
       {/* 작성자 / 레벨 */}
-      <div className="mb-2 grid grid-cols-[1fr_auto] gap-2">
+      <div className={`mb-2 grid gap-2 ${showLevel ? "grid-cols-[1fr_auto]" : ""}`}>
         <div>
           <div className="mb-1 text-xs font-semibold text-slate-700">작성자</div>
           <AuthorPicker
@@ -2309,24 +2426,47 @@ function ProcessingFormPanel({
             accent={accent}
           />
         </div>
-        <div className="w-24">
-          <div className="mb-1 text-xs font-semibold text-slate-700">레벨</div>
+        {showLevel && (
+          <div className="w-24">
+            <div className="mb-1 text-xs font-semibold text-slate-700">레벨</div>
+            <NumSelect
+              value={shared.level}
+              onChange={(v) => setSharedF("level", v)}
+              options={LEVEL_OPTIONS}
+              placeholder="-"
+              accent={accent}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* 기기 선택 (2대 이상일 때만) */}
+      {itemCount > 1 && (
+        <div className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700">기기 선택</span>
+            <span className="text-[10px] text-slate-500">{itemCount}대 중 {selectedItem + 1}번 편집 중</span>
+          </div>
           <NumSelect
-            value={form.level}
-            onChange={(v) => setF("level", v)}
-            options={LEVEL_OPTIONS}
-            placeholder="-"
+            value={String(selectedItem + 1)}
+            onChange={(v) => {
+              const n = parseInt(v, 10);
+              if (!isNaN(n)) setSelectedItem(n - 1);
+            }}
+            options={Array.from({ length: itemCount }, (_, i: number) => String(i + 1))}
+            placeholder="기기 번호"
             accent={accent}
+            suffix="번 기기"
           />
         </div>
-      </div>
+      )}
 
       {/* 처리내용 */}
       <div className="mb-2">
         <div className="mb-1 text-xs font-semibold text-slate-700">처리내용</div>
         <textarea
-          value={form.processContent}
-          onChange={(e) => setF("processContent", e.target.value)}
+          value={itemForm.processContent}
+          onChange={(e) => setItemF("processContent", e.target.value)}
           placeholder="예: 정기점검 / 헤드 청소 후 테스트 출력 정상"
           rows={4}
           className="w-full resize-y rounded-lg bg-slate-50 p-2 text-sm outline-none focus:bg-white"
@@ -2340,29 +2480,29 @@ function ProcessingFormPanel({
           <input
             inputMode="numeric"
             placeholder="흑"
-            value={form.mailBlack}
-            onChange={(e) => setF("mailBlack", e.target.value)}
+            value={itemForm.mailBlack}
+            onChange={(e) => setItemF("mailBlack", e.target.value)}
             className={numInputClass}
           />
           <input
             inputMode="numeric"
             placeholder="컬"
-            value={form.mailColor}
-            onChange={(e) => setF("mailColor", e.target.value)}
+            value={itemForm.mailColor}
+            onChange={(e) => setItemF("mailColor", e.target.value)}
             className={numInputClass}
           />
           <input
             inputMode="numeric"
             placeholder="큰컬"
-            value={form.mailLargeColor}
-            onChange={(e) => setF("mailLargeColor", e.target.value)}
+            value={itemForm.mailLargeColor}
+            onChange={(e) => setItemF("mailLargeColor", e.target.value)}
             className={numInputClass}
           />
           <input
             inputMode="numeric"
             placeholder="합"
-            value={form.mailTotal}
-            onChange={(e) => setF("mailTotal", e.target.value)}
+            value={itemForm.mailTotal}
+            onChange={(e) => setItemF("mailTotal", e.target.value)}
             className={numInputClass}
           />
         </div>
@@ -2373,16 +2513,16 @@ function ProcessingFormPanel({
         <div className="mb-1 text-xs font-semibold text-slate-700">토너잔량 (%)</div>
         <div className="grid grid-cols-2 gap-x-2">
           <FieldRow label="K" dotColor={TONER_COLORS.K}>
-            <NumSelect value={form.tonerK} onChange={(v) => setF("tonerK", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
+            <NumSelect value={itemForm.tonerK} onChange={(v) => setItemF("tonerK", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
           </FieldRow>
           <FieldRow label="C" dotColor={TONER_COLORS.C}>
-            <NumSelect value={form.tonerC} onChange={(v) => setF("tonerC", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
+            <NumSelect value={itemForm.tonerC} onChange={(v) => setItemF("tonerC", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
           </FieldRow>
           <FieldRow label="M" dotColor={TONER_COLORS.M}>
-            <NumSelect value={form.tonerM} onChange={(v) => setF("tonerM", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
+            <NumSelect value={itemForm.tonerM} onChange={(v) => setItemF("tonerM", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
           </FieldRow>
           <FieldRow label="Y" dotColor={TONER_COLORS.Y}>
-            <NumSelect value={form.tonerY} onChange={(v) => setF("tonerY", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
+            <NumSelect value={itemForm.tonerY} onChange={(v) => setItemF("tonerY", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
           </FieldRow>
         </div>
       </div>
@@ -2390,7 +2530,7 @@ function ProcessingFormPanel({
       {/* 폐통 */}
       <div className="mb-2">
         <div className="mb-1 text-xs font-semibold text-slate-700">폐통 (%)</div>
-        <NumSelect value={form.waste} onChange={(v) => setF("waste", v)} options={WASTE_OPTIONS} accent={accent} suffix="%" />
+        <NumSelect value={itemForm.waste} onChange={(v) => setItemF("waste", v)} options={WASTE_OPTIONS} accent={accent} suffix="%" />
       </div>
 
       {/* 여분 */}
@@ -2405,11 +2545,11 @@ function ProcessingFormPanel({
               value=""
               onChange={(v) => {
                 if (!v) return;
-                setF("spareK", v);
-                setF("spareC", v);
-                setF("spareM", v);
-                setF("spareY", v);
-                setF("spareWaste", v);
+                setItemF("spareK", v);
+                setItemF("spareC", v);
+                setItemF("spareM", v);
+                setItemF("spareY", v);
+                setItemF("spareWaste", v);
               }}
               options={SPARE_OPTIONS}
               placeholder="일괄 설정"
@@ -2419,20 +2559,20 @@ function ProcessingFormPanel({
         </div>
         <div className="grid grid-cols-2 gap-x-2">
           <FieldRow label="K" dotColor={TONER_COLORS.K}>
-            <NumSelect value={form.spareK} onChange={(v) => setF("spareK", v)} options={SPARE_OPTIONS} accent={accent} />
+            <NumSelect value={itemForm.spareK} onChange={(v) => setItemF("spareK", v)} options={SPARE_OPTIONS} accent={accent} />
           </FieldRow>
           <FieldRow label="C" dotColor={TONER_COLORS.C}>
-            <NumSelect value={form.spareC} onChange={(v) => setF("spareC", v)} options={SPARE_OPTIONS} accent={accent} />
+            <NumSelect value={itemForm.spareC} onChange={(v) => setItemF("spareC", v)} options={SPARE_OPTIONS} accent={accent} />
           </FieldRow>
           <FieldRow label="M" dotColor={TONER_COLORS.M}>
-            <NumSelect value={form.spareM} onChange={(v) => setF("spareM", v)} options={SPARE_OPTIONS} accent={accent} />
+            <NumSelect value={itemForm.spareM} onChange={(v) => setItemF("spareM", v)} options={SPARE_OPTIONS} accent={accent} />
           </FieldRow>
           <FieldRow label="Y" dotColor={TONER_COLORS.Y}>
-            <NumSelect value={form.spareY} onChange={(v) => setF("spareY", v)} options={SPARE_OPTIONS} accent={accent} />
+            <NumSelect value={itemForm.spareY} onChange={(v) => setItemF("spareY", v)} options={SPARE_OPTIONS} accent={accent} />
           </FieldRow>
         </div>
         <FieldRow label="폐">
-          <NumSelect value={form.spareWaste} onChange={(v) => setF("spareWaste", v)} options={SPARE_OPTIONS} accent={accent} />
+          <NumSelect value={itemForm.spareWaste} onChange={(v) => setItemF("spareWaste", v)} options={SPARE_OPTIONS} accent={accent} />
         </FieldRow>
       </div>
 
@@ -2441,12 +2581,12 @@ function ProcessingFormPanel({
         <div className="mb-1 text-xs font-semibold text-slate-700">한틴이카유무</div>
         <div className="flex flex-wrap gap-1">
           {HANTIN_OPTIONS.map((opt: string) => {
-            const active = form.hantin === opt;
+            const active = itemForm.hantin === opt;
             return (
               <button
                 key={opt}
                 type="button"
-                onClick={() => toggleF("hantin", opt)}
+                onClick={() => toggleItemF("hantin", opt)}
                 className="rounded-full px-2.5 py-1 text-xs font-medium transition active:scale-95"
                 style={{
                   background: active ? accent : "#F1F5F9",
@@ -2465,14 +2605,14 @@ function ProcessingFormPanel({
         <div className="mb-1 text-xs font-semibold text-slate-700">주차비지원유무</div>
         <div className="flex flex-wrap items-center gap-1">
           {PARKING_OPTIONS.map((opt: string) => {
-            const active = form.parkingChip === opt;
+            const active = itemForm.parkingChip === opt;
             return (
               <button
                 key={opt}
                 type="button"
                 onClick={() => {
-                  toggleF("parkingChip", opt);
-                  if (form.parkingChip !== opt) setF("parkingCustom", "");
+                  toggleItemF("parkingChip", opt);
+                  if (itemForm.parkingChip !== opt) setItemF("parkingCustom", "");
                 }}
                 className="rounded-full px-3 py-1 text-xs font-medium transition active:scale-95"
                 style={{
@@ -2487,10 +2627,10 @@ function ProcessingFormPanel({
           <input
             type="text"
             placeholder="직접 입력 (우선 적용)"
-            value={form.parkingCustom}
+            value={itemForm.parkingCustom}
             onChange={(e) => {
-              setF("parkingCustom", e.target.value);
-              if (e.target.value) setF("parkingChip", "");
+              setItemF("parkingCustom", e.target.value);
+              if (e.target.value) setItemF("parkingChip", "");
             }}
             className="ml-1 min-w-0 flex-1 rounded-lg bg-slate-50 px-2 py-1.5 text-xs outline-none focus:bg-white"
           />
@@ -2501,8 +2641,8 @@ function ProcessingFormPanel({
       <div className="mb-3">
         <div className="mb-1 text-xs font-semibold text-slate-700">특이사항</div>
         <textarea
-          value={form.notes}
-          onChange={(e) => setF("notes", e.target.value)}
+          value={itemForm.notes}
+          onChange={(e) => setItemF("notes", e.target.value)}
           rows={2}
           className="w-full resize-none rounded-lg bg-slate-50 p-2 text-sm outline-none focus:bg-white"
         />
@@ -2514,31 +2654,31 @@ function ProcessingFormPanel({
         <div className="space-y-1.5">
           <div>
             <div className="text-[11px] text-slate-500">보증기간 내 여부</div>
-            <input value={form.warranty} onChange={(e) => setF("warranty", e.target.value)} className={textInputClass} />
+            <input value={shared.warranty} onChange={(e) => setSharedF("warranty", e.target.value)} className={textInputClass} />
           </div>
           <div>
             <div className="text-[11px] text-slate-500">교체 전 카운터 누적 사용매수</div>
-            <input value={form.cumCount} onChange={(e) => setF("cumCount", e.target.value)} inputMode="numeric" className={textInputClass} />
+            <input value={shared.cumCount} onChange={(e) => setSharedF("cumCount", e.target.value)} inputMode="numeric" className={textInputClass} />
           </div>
           <div>
             <div className="text-[11px] text-slate-500">사용 부품 예상 사용매수</div>
-            <input value={form.expectedCount} onChange={(e) => setF("expectedCount", e.target.value)} inputMode="numeric" className={textInputClass} />
+            <input value={shared.expectedCount} onChange={(e) => setSharedF("expectedCount", e.target.value)} inputMode="numeric" className={textInputClass} />
           </div>
           <div className="pt-1 text-[11px] font-semibold text-slate-600">▶ 신청 부품</div>
           <div>
             <div className="text-[11px] text-slate-500">물품명</div>
-            <input value={form.partName} onChange={(e) => setF("partName", e.target.value)} className={textInputClass} />
+            <input value={shared.partName} onChange={(e) => setSharedF("partName", e.target.value)} className={textInputClass} />
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             <div>
               <div className="text-[11px] text-slate-500">수량</div>
-              <input value={form.partQty} onChange={(e) => setF("partQty", e.target.value)} inputMode="numeric" className={textInputClass} />
+              <input value={shared.partQty} onChange={(e) => setSharedF("partQty", e.target.value)} inputMode="numeric" className={textInputClass} />
             </div>
             <div>
               <div className="text-[11px] text-slate-500">출고여부</div>
               <NumSelect
-                value={form.partShipped}
-                onChange={(v) => setF("partShipped", v)}
+                value={shared.partShipped}
+                onChange={(v) => setSharedF("partShipped", v)}
                 options={SHIP_OPTIONS}
                 accent={accent}
               />
@@ -2553,18 +2693,18 @@ function ProcessingFormPanel({
         <div className="space-y-1.5">
           <div>
             <div className="text-[11px] text-slate-500">물품</div>
-            <input value={form.selfItem} onChange={(e) => setF("selfItem", e.target.value)} className={textInputClass} />
+            <input value={shared.selfItem} onChange={(e) => setSharedF("selfItem", e.target.value)} className={textInputClass} />
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             <div>
               <div className="text-[11px] text-slate-500">수량</div>
-              <input value={form.selfQty} onChange={(e) => setF("selfQty", e.target.value)} inputMode="numeric" className={textInputClass} />
+              <input value={shared.selfQty} onChange={(e) => setSharedF("selfQty", e.target.value)} inputMode="numeric" className={textInputClass} />
             </div>
             <div>
               <div className="text-[11px] text-slate-500">출고여부</div>
               <NumSelect
-                value={form.selfShipped}
-                onChange={(v) => setF("selfShipped", v)}
+                value={shared.selfShipped}
+                onChange={(v) => setSharedF("selfShipped", v)}
                 options={SHIP_OPTIONS}
                 accent={accent}
               />
@@ -2578,24 +2718,24 @@ function ProcessingFormPanel({
         <div>
           <div className="mb-1 flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-700">도착 시간</span>
-            {form.arrivalHour && (
+            {shared.arrivalHour && (
               <span className="text-xs font-semibold" style={{ color: accent }}>
-                {form.arrivalHour}:{form.arrivalMinute || "00"}
+                {shared.arrivalHour}:{shared.arrivalMinute || "00"}
               </span>
             )}
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             <NumSelect
-              value={form.arrivalHour}
-              onChange={(v) => setF("arrivalHour", v)}
+              value={shared.arrivalHour}
+              onChange={(v) => setSharedF("arrivalHour", v)}
               options={HOUR_OPTIONS}
               placeholder="시"
               accent={accent}
               suffix="시"
             />
             <NumSelect
-              value={form.arrivalMinute}
-              onChange={(v) => setF("arrivalMinute", v)}
+              value={shared.arrivalMinute}
+              onChange={(v) => setSharedF("arrivalMinute", v)}
               options={MINUTE_OPTIONS}
               placeholder="분"
               accent={accent}
@@ -2609,12 +2749,12 @@ function ProcessingFormPanel({
             <span className="text-xs font-semibold text-slate-700">소요 시간</span>
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold" style={{ color: accent }}>
-                {form.duration ? `${form.duration}분` : "0분"}
+                {shared.duration ? `${shared.duration}분` : "0분"}
               </span>
-              {form.duration && (
+              {shared.duration && (
                 <button
                   type="button"
-                  onClick={() => setF("duration", "")}
+                  onClick={() => setSharedF("duration", "")}
                   className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 active:scale-95"
                 >
                   초기화
@@ -2628,8 +2768,8 @@ function ProcessingFormPanel({
                 key={step}
                 type="button"
                 onClick={() => {
-                  const current = parseInt(form.duration || "0", 10) || 0;
-                  setF("duration", String(current + step));
+                  const current = parseInt(shared.duration || "0", 10) || 0;
+                  setSharedF("duration", String(current + step));
                 }}
                 className="rounded-lg bg-slate-100 py-2.5 text-sm font-semibold text-slate-700 transition active:scale-95"
               >
@@ -2788,7 +2928,9 @@ export default function App() {
   const [listOutput, setListOutput] = useState<ResultItem[]>([]);
   const [toast, setToast] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [form, setForm] = useState<ProcessingForm>(EMPTY_FORM);
+  const [itemForms, setItemForms] = useState<PerItemForm[]>([EMPTY_ITEM_FORM]);
+  const [sharedForm, setSharedForm] = useState<SharedForm>(EMPTY_SHARED_FORM);
+  const [selectedItem, setSelectedItem] = useState<number>(0);
   const [airForm, setAirForm] = useState<AirPurifierForm>(EMPTY_AIR_FORM);
   const [editedContents, setEditedContents] = useState<Record<number, string>>({});
   const [editedTextOutput, setEditedTextOutput] = useState<string | null>(null);
@@ -2805,34 +2947,48 @@ export default function App() {
 
   const config = MODE_CONFIG[mode];
   const isListMode = mode === "samsung-note" || mode === "blank-report";
-  const showForm = mode === "blank-report";
+  const showForm = mode === "blank-report" || mode === "inspection";
   const showAirForm = mode === "air-purifier";
 
   const displayedList = useMemo(() => {
     if (mode !== "blank-report") return listOutput;
-    return listOutput.map((item: ResultItem) => ({
+    return listOutput.map((item: ResultItem, i: number) => ({
       ...item,
-      content: applyProcessingForm(item.content, form, author),
+      content: applyProcessingFormV2(
+        item.content,
+        [itemForms[i] ?? EMPTY_ITEM_FORM],
+        sharedForm,
+        author,
+      ),
     }));
-  }, [mode, listOutput, form, author]);
+  }, [mode, listOutput, itemForms, sharedForm, author]);
 
   const displayedTextOutput = useMemo(() => {
     if (mode === "air-purifier") {
       return applyAirPurifierForm(textOutput, airForm, author);
     }
+    if (mode === "inspection") {
+      return applyProcessingFormV2(textOutput, itemForms, sharedForm, author);
+    }
     return textOutput;
-  }, [mode, textOutput, airForm, author]);
+  }, [mode, textOutput, airForm, itemForms, sharedForm, author]);
 
   const effectiveTextOutput = editedTextOutput ?? displayedTextOutput;
 
-  const setF = <K extends keyof ProcessingForm>(key: K, value: ProcessingForm[K]) => {
-    setForm((prev: ProcessingForm) => ({ ...prev, [key]: value }));
+  const currentItemForm = itemForms[selectedItem] ?? EMPTY_ITEM_FORM;
+
+  const setItemF = <K extends keyof PerItemForm>(key: K, value: PerItemForm[K]) => {
+    setItemForms((prev: PerItemForm[]) => prev.map((f: PerItemForm, i: number) =>
+      i === selectedItem ? { ...f, [key]: value } : f,
+    ));
   };
-  const toggleF = (key: keyof ProcessingForm, value: string) => {
-    setForm((prev: ProcessingForm) => ({
-      ...prev,
-      [key]: prev[key] === value ? "" : value,
-    }));
+  const toggleItemF = (key: keyof PerItemForm, value: string) => {
+    setItemForms((prev: PerItemForm[]) => prev.map((f: PerItemForm, i: number) =>
+      i === selectedItem ? { ...f, [key]: f[key] === value ? "" : value } : f,
+    ));
+  };
+  const setSharedF = <K extends keyof SharedForm>(key: K, value: SharedForm[K]) => {
+    setSharedForm((prev: SharedForm) => ({ ...prev, [key]: value }));
   };
   const setAirF = <K extends keyof AirPurifierForm>(key: K, value: AirPurifierForm[K]) => {
     setAirForm((prev: AirPurifierForm) => ({ ...prev, [key]: value }));
@@ -2866,9 +3022,12 @@ export default function App() {
       showToast("입력이 비어있어요", "error");
       return;
     }
+    let nextItemCount = 1;
     if (mode === "inspection") {
-      setTextOutput(transformInspectionText(inputText));
+      const out = transformInspectionText(inputText);
+      setTextOutput(out);
       setListOutput([]);
+      nextItemCount = Math.max(1, countInspectionItems(out));
     } else if (mode === "air-purifier") {
       setTextOutput(transformAirPurifierText(inputText));
       setListOutput([]);
@@ -2876,9 +3035,14 @@ export default function App() {
       setListOutput(transformSamsungNoteTitles(inputText));
       setTextOutput("");
     } else {
-      setListOutput(transformBlankReports(inputText));
+      const items = transformBlankReports(inputText);
+      setListOutput(items);
       setTextOutput("");
+      nextItemCount = Math.max(1, items.length);
     }
+    setItemForms(Array.from({ length: nextItemCount }, () => ({ ...EMPTY_ITEM_FORM })));
+    setSharedForm(EMPTY_SHARED_FORM);
+    setSelectedItem(0);
     setCopiedIndex(null);
     setEditedContents({});
     setEditedTextOutput(null);
@@ -2922,7 +3086,9 @@ export default function App() {
   const handleReset = () => {
     setInputText("");
     resetOutputs();
-    setForm(EMPTY_FORM);
+    setItemForms([{ ...EMPTY_ITEM_FORM }]);
+    setSharedForm(EMPTY_SHARED_FORM);
+    setSelectedItem(0);
     setAirForm(EMPTY_AIR_FORM);
     showToast("초기화 완료");
   };
@@ -3006,16 +3172,22 @@ export default function App() {
           />
         </section>
 
-        {/* Processing form — only for 미양식 */}
+        {/* Processing form — 미양식 + 점검 */}
         {showForm && (
           <ProcessingFormPanel
-            form={form}
-            setF={setF}
-            toggleF={toggleF}
+            itemForm={currentItemForm}
+            setItemF={setItemF}
+            toggleItemF={toggleItemF}
+            shared={sharedForm}
+            setSharedF={setSharedF}
+            itemCount={itemForms.length}
+            selectedItem={selectedItem}
+            setSelectedItem={setSelectedItem}
             accent={config.accent}
             bgSoft={config.bgSoft}
             author={author}
             setAuthor={setAuthor}
+            showLevel={mode === "blank-report"}
           />
         )}
 
