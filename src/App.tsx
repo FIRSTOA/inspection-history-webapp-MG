@@ -2016,14 +2016,13 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
   const [open, setOpen] = useState(false);
   const filled = value !== "";
   const label = placeholder ?? "선택";
-  const gridCols = options.length <= 4 ? 2 : options.length <= 6 ? 3 : 4;
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-lg px-2 py-2 text-left text-sm outline-none transition active:scale-[0.99]"
+        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm outline-none transition active:scale-[0.99]"
         style={{
           background: filled ? "white" : "#F1F5F9",
           borderLeft: filled ? `3px solid ${accent}` : "3px solid transparent",
@@ -2031,7 +2030,8 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
           color: filled ? "#0F172A" : "#64748B",
         }}
       >
-        {filled ? `${value}${suffix ?? ""}` : label}
+        <span className="truncate">{filled ? `${value}${suffix ?? ""}` : label}</span>
+        <span className="ml-1 text-[10px] text-slate-400">▾</span>
       </button>
 
       {open && (
@@ -2041,11 +2041,11 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
           role="dialog"
         >
           <div
-            className="w-full rounded-t-2xl bg-white p-4 pb-6 shadow-2xl"
-            style={{ maxHeight: "70vh" }}
+            className="flex w-full flex-col rounded-t-2xl bg-white shadow-2xl"
+            style={{ maxHeight: "75vh" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <span className="text-sm font-semibold text-slate-700">{label}</span>
               <button
                 type="button"
@@ -2055,21 +2055,14 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
                 닫기
               </button>
             </div>
-            <div
-              className="grid gap-2 overflow-y-auto"
-              style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
-            >
+            <div className="flex-1 overflow-y-auto py-1">
               <button
                 type="button"
                 onClick={() => {
                   onChange("");
                   setOpen(false);
                 }}
-                className="rounded-xl py-3 text-sm font-medium"
-                style={{
-                  background: value === "" ? "#E2E8F0" : "#F1F5F9",
-                  color: "#64748B",
-                }}
+                className="block w-full px-5 py-3 text-left text-sm text-slate-500 transition active:bg-slate-100"
               >
                 해제
               </button>
@@ -2083,10 +2076,11 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
                       onChange(opt);
                       setOpen(false);
                     }}
-                    className="rounded-xl py-3 text-sm font-semibold transition active:scale-95"
+                    className="block w-full px-5 py-3 text-left text-sm transition active:bg-slate-100"
                     style={{
-                      background: active ? accent : "#F1F5F9",
+                      background: active ? accent : "transparent",
                       color: active ? "white" : "#0F172A",
+                      fontWeight: active ? 600 : 400,
                     }}
                   >
                     {opt}{suffix ?? ""}
@@ -2477,6 +2471,7 @@ export default function App() {
   const [toast, setToast] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [form, setForm] = useState<ProcessingForm>(EMPTY_FORM);
+  const [editedContents, setEditedContents] = useState<Record<number, string>>({});
 
   const config = MODE_CONFIG[mode];
   const isListMode = mode === "samsung-note" || mode === "blank-report";
@@ -2514,6 +2509,7 @@ export default function App() {
     setTextOutput("");
     setListOutput([]);
     setCopiedIndex(null);
+    setEditedContents({});
   };
 
   const handleModeChange = (next: Mode) => {
@@ -2540,6 +2536,7 @@ export default function App() {
       setTextOutput("");
     }
     setCopiedIndex(null);
+    setEditedContents({});
   };
 
   const handlePaste = async () => {
@@ -2565,7 +2562,7 @@ export default function App() {
 
   const handleCopyAll = async () => {
     const target = isListMode
-      ? displayedList.map((item: ResultItem) => item.content).join("\n\n")
+      ? displayedList.map((item: ResultItem, i: number) => editedContents[i] ?? item.content).join("\n\n")
       : textOutput;
 
     if (!target) {
@@ -2703,6 +2700,7 @@ export default function App() {
                 {displayedList.map((item: ResultItem, index: number) => {
                   const hasWarning = Boolean(item.warning);
                   const isCopied = copiedIndex === index;
+                  const text = editedContents[index] ?? item.content;
                   const cardBg = isCopied
                     ? "#D1FAE5"
                     : hasWarning
@@ -2713,12 +2711,12 @@ export default function App() {
                     : hasWarning
                       ? "#D97706"
                       : config.accent;
+                  const lineCount = text.split("\n").length;
 
                   return (
-                    <button
+                    <div
                       key={index}
-                      onClick={() => handleCopyCard(item.content, index)}
-                      className="w-full rounded-xl p-3 text-left transition active:scale-[0.99]"
+                      className="rounded-xl p-3"
                       style={{
                         background: cardBg,
                         borderLeft: `3px solid ${borderColor}`,
@@ -2729,14 +2727,31 @@ export default function App() {
                           {hasWarning ? "⚠️" : ""} {index + 1}
                           {hasWarning ? ` · ${item.warning}` : ""}
                         </span>
-                        <span className="text-slate-500">
-                          {isCopied ? "✓ 복사됨" : "탭해서 복사"}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCard(text, index)}
+                          className="rounded-md px-2 py-1 text-xs font-semibold transition active:scale-95"
+                          style={{
+                            background: isCopied ? "#10B981" : "white",
+                            color: isCopied ? "white" : config.accent,
+                            border: `1px solid ${isCopied ? "#10B981" : config.accent}`,
+                          }}
+                        >
+                          {isCopied ? "✓ 복사됨" : "📋 복사"}
+                        </button>
                       </div>
-                      <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-slate-800">
-                        {item.content}
-                      </pre>
-                    </button>
+                      <textarea
+                        value={text}
+                        onChange={(e) =>
+                          setEditedContents((prev: Record<number, string>) => ({
+                            ...prev,
+                            [index]: e.target.value,
+                          }))
+                        }
+                        rows={Math.max(8, lineCount)}
+                        className="w-full resize-y rounded-lg bg-white/60 p-2 font-mono text-xs leading-relaxed text-slate-800 outline-none focus:bg-white"
+                      />
+                    </div>
                   );
                 })}
               </div>
