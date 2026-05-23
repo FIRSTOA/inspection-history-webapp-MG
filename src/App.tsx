@@ -1889,7 +1889,8 @@ type ProcessingForm = {
   selfItem: string;
   selfQty: string;
   selfShipped: string;
-  arrival: string;
+  arrivalHour: string;
+  arrivalMinute: string;
   duration: string;
 };
 
@@ -1905,7 +1906,7 @@ const EMPTY_FORM: ProcessingForm = {
   warranty: "", cumCount: "", expectedCount: "",
   partName: "", partQty: "", partShipped: "",
   selfItem: "", selfQty: "", selfShipped: "",
-  arrival: "", duration: "",
+  arrivalHour: "", arrivalMinute: "", duration: "",
 };
 
 function dash(v: string): string {
@@ -1972,10 +1973,14 @@ function applyProcessingForm(text: string, f: ProcessingForm): string {
       return suffixIfValue("출고여부:", v);
     }
     if (/^도착 시간\s*:/.test(line)) {
-      return suffixIfValue("도착 시간:", f.arrival);
+      const arrival = f.arrivalHour
+        ? `${f.arrivalHour}:${f.arrivalMinute || "00"}`
+        : "";
+      return suffixIfValue("도착 시간:", arrival);
     }
     if (/^소요 시간\s*:/.test(line)) {
-      return suffixIfValue("소요 시간:", f.duration);
+      const duration = f.duration.trim() ? `${f.duration.trim()}분` : "";
+      return suffixIfValue("소요 시간:", duration);
     }
     return line;
   }).join("\n");
@@ -1987,6 +1992,9 @@ const SPARE_OPTIONS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const HANTIN_OPTIONS = ["한공", "한조", "한조해지업체", "보안으로 설치불가", "고객불편으로 설치불가", "무"];
 const PARKING_OPTIONS = ["유", "무"];
 const SHIP_OPTIONS = ["출고부탁드립니다", "선출고완료"];
+const HOUR_OPTIONS = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"];
+const MINUTE_OPTIONS = ["00", "10", "20", "30", "40", "50"];
+const DURATION_STEPS = [1, 5, 10, 30, 60];
 
 const TONER_COLORS: Record<string, string> = {
   K: "#111827",
@@ -2388,14 +2396,69 @@ function ProcessingFormPanel({ form, setF, toggleF, accent, bgSoft }: Processing
       </div>
 
       {/* 시간 */}
-      <div className="grid grid-cols-2 gap-1.5">
+      <div className="space-y-2">
         <div>
-          <div className="text-[11px] text-slate-500">도착 시간</div>
-          <input value={form.arrival} onChange={(e) => setF("arrival", e.target.value)} className={textInputClass} />
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700">도착 시간</span>
+            {form.arrivalHour && (
+              <span className="text-xs font-semibold" style={{ color: accent }}>
+                {form.arrivalHour}:{form.arrivalMinute || "00"}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <NumSelect
+              value={form.arrivalHour}
+              onChange={(v) => setF("arrivalHour", v)}
+              options={HOUR_OPTIONS}
+              placeholder="시"
+              accent={accent}
+              suffix="시"
+            />
+            <NumSelect
+              value={form.arrivalMinute}
+              onChange={(v) => setF("arrivalMinute", v)}
+              options={MINUTE_OPTIONS}
+              placeholder="분"
+              accent={accent}
+              suffix="분"
+            />
+          </div>
         </div>
+
         <div>
-          <div className="text-[11px] text-slate-500">소요 시간</div>
-          <input value={form.duration} onChange={(e) => setF("duration", e.target.value)} className={textInputClass} />
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700">소요 시간</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold" style={{ color: accent }}>
+                {form.duration ? `${form.duration}분` : "0분"}
+              </span>
+              {form.duration && (
+                <button
+                  type="button"
+                  onClick={() => setF("duration", "")}
+                  className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 active:scale-95"
+                >
+                  초기화
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-5 gap-1.5">
+            {DURATION_STEPS.map((step: number) => (
+              <button
+                key={step}
+                type="button"
+                onClick={() => {
+                  const current = parseInt(form.duration || "0", 10) || 0;
+                  setF("duration", String(current + step));
+                }}
+                className="rounded-lg bg-slate-100 py-2.5 text-sm font-semibold text-slate-700 transition active:scale-95"
+              >
+                +{step}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </section>
