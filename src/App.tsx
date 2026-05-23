@@ -2011,11 +2011,38 @@ function mergeSpareLine(line: string, f: PerItemForm): string {
   return `여분:  K${dashIfEmpty(K)} C${dashIfEmpty(C)} M${dashIfEmpty(M)} Y${dashIfEmpty(Y)} 폐${dashIfEmpty(waste)}${trailing}`;
 }
 
+// Replaces only the numeric value of a single channel marker in-place,
+// leaving prefixes (토너/드럼), separators, location notes, and unknown
+// tokens untouched. Used for 점검 mode where 여분 lines are free-form.
+function setChannelValue(line: string, letter: string, value: string): string {
+  const flags = /[A-Za-z]/.test(letter) ? "i" : "";
+  const withDigits = new RegExp(`(${letter}\\s*-?\\s*)\\d+`, flags);
+  if (withDigits.test(line)) {
+    return line.replace(withDigits, `$1${value}`);
+  }
+  const placeholder = new RegExp(`(${letter})(\\s*-)`, flags);
+  if (placeholder.test(line)) {
+    return line.replace(placeholder, `$1$2${value}`);
+  }
+  return line;
+}
+
+function mergeSpareInPlace(line: string, f: PerItemForm): string {
+  let result = line;
+  if (f.spareK.trim()) result = setChannelValue(result, "K", f.spareK.trim());
+  if (f.spareC.trim()) result = setChannelValue(result, "C", f.spareC.trim());
+  if (f.spareM.trim()) result = setChannelValue(result, "M", f.spareM.trim());
+  if (f.spareY.trim()) result = setChannelValue(result, "Y", f.spareY.trim());
+  if (f.spareWaste.trim()) result = setChannelValue(result, "폐", f.spareWaste.trim());
+  return result;
+}
+
 function applyProcessingFormV2(
   text: string,
   itemForms: PerItemForm[],
   shared: SharedForm,
-  author: string
+  author: string,
+  spareInPlace = false
 ): string {
   let itemIdx = -1;
   let section: "" | "parts" | "self" = "";
@@ -2046,7 +2073,7 @@ function applyProcessingFormV2(
       if (/^매수\s*:/.test(line)) return mergeMailLine(line, f);
       if (/^토너잔량\s*:/.test(line)) return mergeTonerLine(line, f);
       if (/^폐통\s*:/.test(line)) return mergeWasteLine(line, f);
-      if (/^여분\s*:/.test(line)) return mergeSpareLine(line, f);
+      if (/^여분\s*:/.test(line)) return spareInPlace ? mergeSpareInPlace(line, f) : mergeSpareLine(line, f);
       if (/^한틴이카유무\s*:/.test(line)) {
         const existing = parseValueAfterColon(line, "한틴이카유무");
         const v = f.hantin.trim() || existing;
@@ -3014,7 +3041,7 @@ export default function App() {
       return applyAirPurifierForm(textOutput, airForm, author);
     }
     if (mode === "inspection") {
-      return applyProcessingFormV2(textOutput, itemForms, sharedForm, author);
+      return applyProcessingFormV2(textOutput, itemForms, sharedForm, author, true);
     }
     return textOutput;
   }, [mode, textOutput, airForm, itemForms, sharedForm, author]);
