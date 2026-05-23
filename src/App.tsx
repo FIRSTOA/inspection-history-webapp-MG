@@ -1988,51 +1988,62 @@ const HANTIN_OPTIONS = ["한공", "한조", "한조해지업체", "보안으로 
 const PARKING_OPTIONS = ["유", "무"];
 const SHIP_OPTIONS = ["출고부탁드립니다", "선출고완료"];
 
-type ChipRowProps = {
-  options: string[];
-  value: string;
-  onSelect: (v: string) => void;
-  accent: string;
-  cols?: number;
+const TONER_COLORS: Record<string, string> = {
+  K: "#111827",
+  C: "#06B6D4",
+  M: "#EC4899",
+  Y: "#EAB308",
 };
 
-function ChipRow({ options, value, onSelect, accent, cols }: ChipRowProps) {
-  const gridClass = cols
-    ? `grid gap-1 py-0.5`
-    : `flex flex-wrap gap-1 py-0.5`;
-  const style = cols ? { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` } : undefined;
+type NumSelectProps = {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder?: string;
+  accent: string;
+  suffix?: string;
+};
+
+function NumSelect({ value, onChange, options, placeholder, accent, suffix }: NumSelectProps) {
+  const filled = value !== "";
   return (
-    <div className={gridClass} style={style}>
-      {options.map((opt: string) => {
-        const active = value === opt;
-        return (
-          <button
-            key={opt}
-            type="button"
-            onClick={() => onSelect(opt)}
-            className="rounded-full px-1 py-1.5 text-xs font-medium transition active:scale-95"
-            style={{
-              background: active ? accent : "#F1F5F9",
-              color: active ? "white" : "#334155",
-            }}
-          >
-            {opt}
-          </button>
-        );
-      })}
-    </div>
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded-lg px-2 py-2 text-sm outline-none"
+      style={{
+        background: filled ? "white" : "#F1F5F9",
+        borderLeft: filled ? `3px solid ${accent}` : "3px solid transparent",
+        fontWeight: filled ? 600 : 400,
+        color: filled ? "#0F172A" : "#64748B",
+      }}
+    >
+      <option value="">{placeholder ?? "선택"}</option>
+      {options.map((opt: string) => (
+        <option key={opt} value={opt}>
+          {opt}{suffix ?? ""}
+        </option>
+      ))}
+    </select>
   );
 }
 
 type FormFieldRowProps = {
   label: string;
+  dotColor?: string;
   children: ReactNode;
 };
 
-function FieldRow({ label, children }: FormFieldRowProps) {
+function FieldRow({ label, dotColor, children }: FormFieldRowProps) {
   return (
-    <div className="flex items-center gap-2 py-1">
-      <span className="w-6 shrink-0 text-xs font-semibold text-slate-500">{label}</span>
+    <div className="flex items-center gap-1.5 py-1">
+      {dotColor && (
+        <span
+          className="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-slate-300"
+          style={{ background: dotColor }}
+        />
+      )}
+      <span className="w-5 shrink-0 text-xs font-semibold text-slate-600">{label}</span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -2062,11 +2073,12 @@ function ProcessingFormPanel({ form, setF, toggleF, accent, bgSoft }: Processing
       {/* 처리내용 */}
       <div className="mb-2">
         <div className="mb-1 text-xs font-semibold text-slate-700">처리내용</div>
-        <input
+        <textarea
           value={form.processContent}
           onChange={(e) => setF("processContent", e.target.value)}
-          placeholder="예: 정기점검 / 헤드 청소"
-          className={textInputClass}
+          placeholder="예: 정기점검 / 헤드 청소 후 테스트 출력 정상"
+          rows={4}
+          className="w-full resize-y rounded-lg bg-slate-50 p-2 text-sm outline-none focus:bg-white"
         />
       </div>
 
@@ -2108,58 +2120,68 @@ function ProcessingFormPanel({ form, setF, toggleF, accent, bgSoft }: Processing
       {/* 토너잔량 */}
       <div className="mb-2 rounded-xl p-2" style={{ background: bgSoft }}>
         <div className="mb-1 text-xs font-semibold text-slate-700">토너잔량 (%)</div>
-        <FieldRow label="K">
-          <ChipRow options={TONER_OPTIONS} value={form.tonerK} onSelect={(v) => toggleF("tonerK", v)} accent={accent} cols={5} />
-        </FieldRow>
-        <FieldRow label="C">
-          <ChipRow options={TONER_OPTIONS} value={form.tonerC} onSelect={(v) => toggleF("tonerC", v)} accent={accent} cols={5} />
-        </FieldRow>
-        <FieldRow label="M">
-          <ChipRow options={TONER_OPTIONS} value={form.tonerM} onSelect={(v) => toggleF("tonerM", v)} accent={accent} cols={5} />
-        </FieldRow>
-        <FieldRow label="Y">
-          <ChipRow options={TONER_OPTIONS} value={form.tonerY} onSelect={(v) => toggleF("tonerY", v)} accent={accent} cols={5} />
-        </FieldRow>
+        <div className="grid grid-cols-2 gap-x-2">
+          <FieldRow label="K" dotColor={TONER_COLORS.K}>
+            <NumSelect value={form.tonerK} onChange={(v) => setF("tonerK", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
+          </FieldRow>
+          <FieldRow label="C" dotColor={TONER_COLORS.C}>
+            <NumSelect value={form.tonerC} onChange={(v) => setF("tonerC", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
+          </FieldRow>
+          <FieldRow label="M" dotColor={TONER_COLORS.M}>
+            <NumSelect value={form.tonerM} onChange={(v) => setF("tonerM", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
+          </FieldRow>
+          <FieldRow label="Y" dotColor={TONER_COLORS.Y}>
+            <NumSelect value={form.tonerY} onChange={(v) => setF("tonerY", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
+          </FieldRow>
+        </div>
       </div>
 
       {/* 폐통 */}
       <div className="mb-2">
         <div className="mb-1 text-xs font-semibold text-slate-700">폐통 (%)</div>
-        <ChipRow options={WASTE_OPTIONS} value={form.waste} onSelect={(v) => toggleF("waste", v)} accent={accent} cols={5} />
+        <NumSelect value={form.waste} onChange={(v) => setF("waste", v)} options={WASTE_OPTIONS} accent={accent} suffix="%" />
       </div>
 
       {/* 여분 */}
       <div className="mb-2 rounded-xl p-2" style={{ background: bgSoft }}>
-        <div className="mb-1 text-xs font-semibold text-slate-700">여분</div>
-        <FieldRow label="전">
-          <ChipRow
-            options={SPARE_OPTIONS}
-            value=""
-            onSelect={(v) => {
-              setF("spareK", v);
-              setF("spareC", v);
-              setF("spareM", v);
-              setF("spareY", v);
-              setF("spareWaste", v);
-            }}
-            accent={accent}
-            cols={6}
-          />
-        </FieldRow>
-        <FieldRow label="K">
-          <ChipRow options={SPARE_OPTIONS} value={form.spareK} onSelect={(v) => toggleF("spareK", v)} accent={accent} cols={6} />
-        </FieldRow>
-        <FieldRow label="C">
-          <ChipRow options={SPARE_OPTIONS} value={form.spareC} onSelect={(v) => toggleF("spareC", v)} accent={accent} cols={6} />
-        </FieldRow>
-        <FieldRow label="M">
-          <ChipRow options={SPARE_OPTIONS} value={form.spareM} onSelect={(v) => toggleF("spareM", v)} accent={accent} cols={6} />
-        </FieldRow>
-        <FieldRow label="Y">
-          <ChipRow options={SPARE_OPTIONS} value={form.spareY} onSelect={(v) => toggleF("spareY", v)} accent={accent} cols={6} />
-        </FieldRow>
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs font-semibold text-slate-700">여분</span>
+          <span className="text-[10px] text-slate-500">전체 한번에 설정</span>
+        </div>
+        <div className="mb-1.5">
+          <FieldRow label="전">
+            <NumSelect
+              value=""
+              onChange={(v) => {
+                if (!v) return;
+                setF("spareK", v);
+                setF("spareC", v);
+                setF("spareM", v);
+                setF("spareY", v);
+                setF("spareWaste", v);
+              }}
+              options={SPARE_OPTIONS}
+              placeholder="일괄 설정"
+              accent={accent}
+            />
+          </FieldRow>
+        </div>
+        <div className="grid grid-cols-2 gap-x-2">
+          <FieldRow label="K" dotColor={TONER_COLORS.K}>
+            <NumSelect value={form.spareK} onChange={(v) => setF("spareK", v)} options={SPARE_OPTIONS} accent={accent} />
+          </FieldRow>
+          <FieldRow label="C" dotColor={TONER_COLORS.C}>
+            <NumSelect value={form.spareC} onChange={(v) => setF("spareC", v)} options={SPARE_OPTIONS} accent={accent} />
+          </FieldRow>
+          <FieldRow label="M" dotColor={TONER_COLORS.M}>
+            <NumSelect value={form.spareM} onChange={(v) => setF("spareM", v)} options={SPARE_OPTIONS} accent={accent} />
+          </FieldRow>
+          <FieldRow label="Y" dotColor={TONER_COLORS.Y}>
+            <NumSelect value={form.spareY} onChange={(v) => setF("spareY", v)} options={SPARE_OPTIONS} accent={accent} />
+          </FieldRow>
+        </div>
         <FieldRow label="폐">
-          <ChipRow options={SPARE_OPTIONS} value={form.spareWaste} onSelect={(v) => toggleF("spareWaste", v)} accent={accent} cols={6} />
+          <NumSelect value={form.spareWaste} onChange={(v) => setF("spareWaste", v)} options={SPARE_OPTIONS} accent={accent} />
         </FieldRow>
       </div>
 
@@ -2263,27 +2285,13 @@ function ProcessingFormPanel({ form, setF, toggleF, accent, bgSoft }: Processing
             </div>
             <div>
               <div className="text-[11px] text-slate-500">출고여부</div>
-              <input value={form.partShipped} onChange={(e) => setF("partShipped", e.target.value)} className={textInputClass} />
+              <NumSelect
+                value={form.partShipped}
+                onChange={(v) => setF("partShipped", v)}
+                options={SHIP_OPTIONS}
+                accent={accent}
+              />
             </div>
-          </div>
-          <div className="flex flex-wrap gap-1 pt-1">
-            {SHIP_OPTIONS.map((opt: string) => {
-              const active = form.partShipped === opt;
-              return (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setF("partShipped", active ? "" : opt)}
-                  className="rounded-full px-2.5 py-1 text-[11px] font-medium transition active:scale-95"
-                  style={{
-                    background: active ? accent : "#F1F5F9",
-                    color: active ? "white" : "#334155",
-                  }}
-                >
-                  {opt}
-                </button>
-              );
-            })}
           </div>
         </div>
       </div>
@@ -2303,27 +2311,13 @@ function ProcessingFormPanel({ form, setF, toggleF, accent, bgSoft }: Processing
             </div>
             <div>
               <div className="text-[11px] text-slate-500">출고여부</div>
-              <input value={form.selfShipped} onChange={(e) => setF("selfShipped", e.target.value)} className={textInputClass} />
+              <NumSelect
+                value={form.selfShipped}
+                onChange={(v) => setF("selfShipped", v)}
+                options={SHIP_OPTIONS}
+                accent={accent}
+              />
             </div>
-          </div>
-          <div className="flex flex-wrap gap-1 pt-1">
-            {SHIP_OPTIONS.map((opt: string) => {
-              const active = form.selfShipped === opt;
-              return (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setF("selfShipped", active ? "" : opt)}
-                  className="rounded-full px-2.5 py-1 text-[11px] font-medium transition active:scale-95"
-                  style={{
-                    background: active ? accent : "#F1F5F9",
-                    color: active ? "white" : "#334155",
-                  }}
-                >
-                  {opt}
-                </button>
-              );
-            })}
           </div>
         </div>
       </div>
