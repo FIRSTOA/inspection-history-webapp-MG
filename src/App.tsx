@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
+import { AUTHOR_BOOK, AUTHOR_TEAMS } from "./authors";
+import type { AuthorTeam } from "./authors";
 
 type Mode = "inspection" | "blank-report" | "air-purifier" | "samsung-note";
 
@@ -1911,12 +1913,6 @@ const EMPTY_FORM: ProcessingForm = {
   arrivalHour: "", arrivalMinute: "", duration: "",
 };
 
-type AuthorTeam = "A" | "B" | "C" | "D";
-const AUTHOR_TEAMS: AuthorTeam[] = ["A", "B", "C", "D"];
-type AuthorBook = Record<AuthorTeam, string[]>;
-
-const EMPTY_AUTHOR_BOOK: AuthorBook = { A: [], B: [], C: [], D: [] };
-
 type AirPurifierForm = {
   filterReset: string;
   filterChange: string;
@@ -2160,31 +2156,13 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
 type AuthorPickerProps = {
   value: string;
   onChange: (v: string) => void;
-  authorBook: AuthorBook;
-  setAuthorBook: (next: AuthorBook) => void;
   accent: string;
 };
 
-function AuthorPicker({ value, onChange, authorBook, setAuthorBook, accent }: AuthorPickerProps) {
+function AuthorPicker({ value, onChange, accent }: AuthorPickerProps) {
   const [open, setOpen] = useState(false);
-  const [team, setTeam] = useState<AuthorTeam>("A");
-  const [newName, setNewName] = useState("");
+  const [team, setTeam] = useState<AuthorTeam>("팀장");
   const filled = value !== "";
-
-  const addName = () => {
-    const name = newName.trim();
-    if (!name) return;
-    if (authorBook[team].includes(name)) {
-      setNewName("");
-      return;
-    }
-    setAuthorBook({ ...authorBook, [team]: [...authorBook[team], name] });
-    setNewName("");
-  };
-
-  const removeName = (name: string) => {
-    setAuthorBook({ ...authorBook, [team]: authorBook[team].filter((n: string) => n !== name) });
-  };
 
   return (
     <>
@@ -2224,86 +2202,48 @@ function AuthorPicker({ value, onChange, authorBook, setAuthorBook, accent }: Au
                 닫기
               </button>
             </div>
-            <div className="grid grid-cols-4 gap-1 border-b border-slate-100 px-3 py-2">
+            <div className="grid grid-cols-5 gap-1 border-b border-slate-100 px-3 py-2">
               {AUTHOR_TEAMS.map((t: AuthorTeam) => {
                 const active = team === t;
+                const label = t === "팀장" ? "팀장" : `${t}팀`;
                 return (
                   <button
                     key={t}
                     type="button"
                     onClick={() => setTeam(t)}
-                    className="rounded-lg py-2 text-sm font-semibold transition active:scale-95"
+                    className="rounded-lg py-2 text-xs font-semibold transition active:scale-95"
                     style={{
                       background: active ? accent : "#F1F5F9",
                       color: active ? "white" : "#334155",
                     }}
                   >
-                    {t}팀 ({authorBook[t].length})
+                    {label}
                   </button>
                 );
               })}
             </div>
-            <div className="flex-1 overflow-y-auto py-1">
-              {authorBook[team].length === 0 && (
-                <div className="px-5 py-6 text-center text-xs text-slate-400">
-                  등록된 이름이 없습니다. 아래에서 추가하세요.
-                </div>
-              )}
-              {authorBook[team].map((name: string) => {
+            <div className="flex-1 overflow-y-auto py-1 pb-3">
+              {AUTHOR_BOOK[team].map((name: string) => {
                 const active = value === name;
                 return (
-                  <div
+                  <button
                     key={name}
-                    className="flex items-center gap-1 border-b border-slate-50"
+                    type="button"
+                    onClick={() => {
+                      onChange(name);
+                      setOpen(false);
+                    }}
+                    className="block w-full border-b border-slate-50 px-5 py-3 text-left text-sm transition active:bg-slate-100"
+                    style={{
+                      background: active ? accent : "transparent",
+                      color: active ? "white" : "#0F172A",
+                      fontWeight: active ? 600 : 400,
+                    }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onChange(name);
-                        setOpen(false);
-                      }}
-                      className="flex-1 px-5 py-3 text-left text-sm transition active:bg-slate-100"
-                      style={{
-                        background: active ? accent : "transparent",
-                        color: active ? "white" : "#0F172A",
-                        fontWeight: active ? 600 : 400,
-                      }}
-                    >
-                      {name}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeName(name)}
-                      className="mr-3 rounded-md px-2 py-1 text-xs text-rose-500 transition active:scale-95"
-                      aria-label={`${name} 삭제`}
-                    >
-                      삭제
-                    </button>
-                  </div>
+                    {name}
+                  </button>
                 );
               })}
-            </div>
-            <div className="flex items-center gap-2 border-t border-slate-100 p-3 pb-5">
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addName();
-                  }
-                }}
-                placeholder={`${team}팀에 이름 추가`}
-                className="flex-1 rounded-lg bg-slate-50 px-3 py-2 text-sm outline-none focus:bg-white"
-              />
-              <button
-                type="button"
-                onClick={addName}
-                className="rounded-lg px-3 py-2 text-sm font-semibold text-white transition active:scale-95"
-                style={{ background: accent }}
-              >
-                추가
-              </button>
             </div>
           </div>
         </div>
@@ -2341,13 +2281,11 @@ type ProcessingFormPanelProps = {
   bgSoft: string;
   author: string;
   setAuthor: (v: string) => void;
-  authorBook: AuthorBook;
-  setAuthorBook: (next: AuthorBook) => void;
 };
 
 function ProcessingFormPanel({
   form, setF, toggleF, accent, bgSoft,
-  author, setAuthor, authorBook, setAuthorBook,
+  author, setAuthor,
 }: ProcessingFormPanelProps) {
   const numInputClass =
     "w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white";
@@ -2368,8 +2306,6 @@ function ProcessingFormPanel({
           <AuthorPicker
             value={author}
             onChange={setAuthor}
-            authorBook={authorBook}
-            setAuthorBook={setAuthorBook}
             accent={accent}
           />
         </div>
@@ -2713,13 +2649,11 @@ type AirPurifierFormPanelProps = {
   accent: string;
   author: string;
   setAuthor: (v: string) => void;
-  authorBook: AuthorBook;
-  setAuthorBook: (next: AuthorBook) => void;
 };
 
 function AirPurifierFormPanel({
   form, setAirF, accent,
-  author, setAuthor, authorBook, setAuthorBook,
+  author, setAuthor,
 }: AirPurifierFormPanelProps) {
   return (
     <section className="mb-3 rounded-2xl bg-white p-3 shadow-sm sm:p-4">
@@ -2734,8 +2668,6 @@ function AirPurifierFormPanel({
         <AuthorPicker
           value={author}
           onChange={setAuthor}
-          authorBook={authorBook}
-          setAuthorBook={setAuthorBook}
           accent={accent}
         />
       </div>
@@ -2864,32 +2796,12 @@ export default function App() {
   const [author, setAuthor] = useState<string>(() => {
     try { return localStorage.getItem("author") || ""; } catch { return ""; }
   });
-  const [authorBook, setAuthorBook] = useState<AuthorBook>(() => {
-    try {
-      const raw = localStorage.getItem("authorBook");
-      if (!raw) return EMPTY_AUTHOR_BOOK;
-      const parsed = JSON.parse(raw);
-      return {
-        A: Array.isArray(parsed.A) ? parsed.A : [],
-        B: Array.isArray(parsed.B) ? parsed.B : [],
-        C: Array.isArray(parsed.C) ? parsed.C : [],
-        D: Array.isArray(parsed.D) ? parsed.D : [],
-      };
-    } catch {
-      return EMPTY_AUTHOR_BOOK;
-    }
-  });
 
   useEffect(() => {
     try { localStorage.setItem("author", author); } catch {
       // ignore quota / private mode errors
     }
   }, [author]);
-  useEffect(() => {
-    try { localStorage.setItem("authorBook", JSON.stringify(authorBook)); } catch {
-      // ignore quota / private mode errors
-    }
-  }, [authorBook]);
 
   const config = MODE_CONFIG[mode];
   const isListMode = mode === "samsung-note" || mode === "blank-report";
@@ -3104,8 +3016,6 @@ export default function App() {
             bgSoft={config.bgSoft}
             author={author}
             setAuthor={setAuthor}
-            authorBook={authorBook}
-            setAuthorBook={setAuthorBook}
           />
         )}
 
@@ -3117,8 +3027,6 @@ export default function App() {
             accent={config.accent}
             author={author}
             setAuthor={setAuthor}
-            authorBook={authorBook}
-            setAuthorBook={setAuthorBook}
           />
         )}
 
