@@ -2005,26 +2005,91 @@ type NumSelectProps = {
 };
 
 function NumSelect({ value, onChange, options, placeholder, accent, suffix }: NumSelectProps) {
+  const [open, setOpen] = useState(false);
   const filled = value !== "";
+  const label = placeholder ?? "선택";
+  const gridCols = options.length <= 4 ? 2 : options.length <= 6 ? 3 : 4;
+
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-lg px-2 py-2 text-sm outline-none"
-      style={{
-        background: filled ? "white" : "#F1F5F9",
-        borderLeft: filled ? `3px solid ${accent}` : "3px solid transparent",
-        fontWeight: filled ? 600 : 400,
-        color: filled ? "#0F172A" : "#64748B",
-      }}
-    >
-      <option value="">{placeholder ?? "선택"}</option>
-      {options.map((opt: string) => (
-        <option key={opt} value={opt}>
-          {opt}{suffix ?? ""}
-        </option>
-      ))}
-    </select>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full rounded-lg px-2 py-2 text-left text-sm outline-none transition active:scale-[0.99]"
+        style={{
+          background: filled ? "white" : "#F1F5F9",
+          borderLeft: filled ? `3px solid ${accent}` : "3px solid transparent",
+          fontWeight: filled ? 600 : 400,
+          color: filled ? "#0F172A" : "#64748B",
+        }}
+      >
+        {filled ? `${value}${suffix ?? ""}` : label}
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-black/40"
+          onClick={() => setOpen(false)}
+          role="dialog"
+        >
+          <div
+            className="w-full rounded-t-2xl bg-white p-4 pb-6 shadow-2xl"
+            style={{ maxHeight: "70vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-sm font-semibold text-slate-700">{label}</span>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-md px-2 py-1 text-xs text-slate-500"
+              >
+                닫기
+              </button>
+            </div>
+            <div
+              className="grid gap-2 overflow-y-auto"
+              style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+                className="rounded-xl py-3 text-sm font-medium"
+                style={{
+                  background: value === "" ? "#E2E8F0" : "#F1F5F9",
+                  color: "#64748B",
+                }}
+              >
+                해제
+              </button>
+              {options.map((opt: string) => {
+                const active = value === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => {
+                      onChange(opt);
+                      setOpen(false);
+                    }}
+                    className="rounded-xl py-3 text-sm font-semibold transition active:scale-95"
+                    style={{
+                      background: active ? accent : "#F1F5F9",
+                      color: active ? "white" : "#0F172A",
+                    }}
+                  >
+                    {opt}{suffix ?? ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
