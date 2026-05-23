@@ -2022,7 +2022,7 @@ function applyProcessingFormV2(
   let section: "" | "parts" | "self" = "";
 
   return text.split("\n").map((line: string) => {
-    if (/^\s*\d+\.\s*$/.test(line)) {
+    if (/^\s*\d+\./.test(line) && !/※/.test(line)) {
       itemIdx++;
       section = "";
       return line;
@@ -2119,7 +2119,39 @@ function applyProcessingFormV2(
 
 function countInspectionItems(text: string): number {
   if (!text) return 0;
-  return text.split("\n").filter((l: string) => /^\s*\d+\.\s*$/.test(l)).length;
+  return text.split("\n").filter((l: string) => /^\s*\d+\./.test(l)).length;
+}
+
+function extractInspectionItemLabels(text: string): string[] {
+  if (!text) return [];
+  const labels: string[] = [];
+  let idx = -1;
+  let model = "";
+  let serial = "";
+  let asset = "";
+
+  const flush = () => {
+    if (idx < 0) return;
+    const parts = [model, serial, asset].map((p: string) => p.trim()).filter((p: string) => p);
+    labels.push(`${idx + 1}. ${parts.length ? parts.join("/") : "(미상)"}`);
+  };
+
+  for (const line of text.split("\n")) {
+    if (/^\s*\d+\./.test(line)) {
+      flush();
+      idx++;
+      model = serial = asset = "";
+      continue;
+    }
+    const mm = line.match(/^모델명\s*:\s*(.*)$/);
+    if (mm) { model = mm[1]; continue; }
+    const ms = line.match(/^시리얼넘버\s*:\s*(.*)$/);
+    if (ms) { serial = ms[1]; continue; }
+    const ma = line.match(/^자산기번\s*:\s*(.*)$/);
+    if (ma) { asset = ma[1]; continue; }
+  }
+  flush();
+  return labels;
 }
 
 function applyAirPurifierForm(text: string, f: AirPurifierForm, author: string): string {
@@ -2173,15 +2205,23 @@ type NumSelectProps = {
   value: string;
   onChange: (v: string) => void;
   options: string[];
+  labels?: string[];
   placeholder?: string;
   accent: string;
   suffix?: string;
 };
 
-function NumSelect({ value, onChange, options, placeholder, accent, suffix }: NumSelectProps) {
+function NumSelect({ value, onChange, options, labels, placeholder, accent, suffix }: NumSelectProps) {
   const [open, setOpen] = useState(false);
   const filled = value !== "";
   const label = placeholder ?? "선택";
+  const labelFor = (v: string): string => {
+    if (labels) {
+      const idx = options.indexOf(v);
+      if (idx >= 0) return labels[idx];
+    }
+    return `${v}${suffix ?? ""}`;
+  };
 
   return (
     <>
@@ -2196,7 +2236,7 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
           color: filled ? "#0F172A" : "#64748B",
         }}
       >
-        <span className="truncate">{filled ? `${value}${suffix ?? ""}` : label}</span>
+        <span className="truncate">{filled ? labelFor(value) : label}</span>
         <span className="ml-1 text-[10px] text-slate-400">▾</span>
       </button>
 
@@ -2232,8 +2272,9 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
               >
                 해제
               </button>
-              {options.map((opt: string) => {
+              {options.map((opt: string, i: number) => {
                 const active = value === opt;
+                const text = labels?.[i] ?? `${opt}${suffix ?? ""}`;
                 return (
                   <button
                     key={opt}
@@ -2249,7 +2290,7 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
                       fontWeight: active ? 600 : 400,
                     }}
                   >
-                    {opt}{suffix ?? ""}
+                    {text}
                   </button>
                 );
               })}
@@ -2388,6 +2429,7 @@ type ProcessingFormPanelProps = {
   shared: SharedForm;
   setSharedF: <K extends keyof SharedForm>(key: K, value: SharedForm[K]) => void;
   itemCount: number;
+  itemLabels: string[];
   selectedItem: number;
   setSelectedItem: (i: number) => void;
   accent: string;
@@ -2400,7 +2442,7 @@ type ProcessingFormPanelProps = {
 function ProcessingFormPanel({
   itemForm, setItemF, toggleItemF,
   shared, setSharedF,
-  itemCount, selectedItem, setSelectedItem,
+  itemCount, itemLabels, selectedItem, setSelectedItem,
   accent, bgSoft,
   author, setAuthor, showLevel,
 }: ProcessingFormPanelProps) {
@@ -2448,15 +2490,15 @@ function ProcessingFormPanel({
             <span className="text-[10px] text-slate-500">{itemCount}대 중 {selectedItem + 1}번 편집 중</span>
           </div>
           <NumSelect
-            value={String(selectedItem + 1)}
+            value={String(selectedItem)}
             onChange={(v) => {
               const n = parseInt(v, 10);
-              if (!isNaN(n)) setSelectedItem(n - 1);
+              if (!isNaN(n)) setSelectedItem(n);
             }}
-            options={Array.from({ length: itemCount }, (_, i: number) => String(i + 1))}
-            placeholder="기기 번호"
+            options={Array.from({ length: itemCount }, (_, i: number) => String(i))}
+            labels={Array.from({ length: itemCount }, (_, i: number) => itemLabels[i] ?? `${i + 1}.`)}
+            placeholder="기기 선택"
             accent={accent}
-            suffix="번 기기"
           />
         </div>
       )}
@@ -2977,6 +3019,17 @@ export default function App() {
 
   const currentItemForm = itemForms[selectedItem] ?? EMPTY_ITEM_FORM;
 
+  const itemLabels = useMemo(() => {
+    if (mode === "inspection") return extractInspectionItemLabels(textOutput);
+    if (mode === "blank-report") {
+      return listOutput.map((item: ResultItem, i: number) => {
+        const labels = extractInspectionItemLabels(item.content);
+        return labels[0] ?? `${i + 1}.`;
+      });
+    }
+    return [];
+  }, [mode, textOutput, listOutput]);
+
   const setItemF = <K extends keyof PerItemForm>(key: K, value: PerItemForm[K]) => {
     setItemForms((prev: PerItemForm[]) => prev.map((f: PerItemForm, i: number) =>
       i === selectedItem ? { ...f, [key]: value } : f,
@@ -3014,7 +3067,35 @@ export default function App() {
 
   const handleModeChange = (next: Mode) => {
     setMode(next);
-    resetOutputs();
+  };
+
+  const runTransform = (text: string, m: Mode) => {
+    let nextItemCount = 1;
+    if (m === "inspection") {
+      const out = transformInspectionText(text);
+      setTextOutput(out);
+      setListOutput([]);
+      nextItemCount = Math.max(1, countInspectionItems(out));
+    } else if (m === "air-purifier") {
+      setTextOutput(transformAirPurifierText(text));
+      setListOutput([]);
+    } else if (m === "samsung-note") {
+      setListOutput(transformSamsungNoteTitles(text));
+      setTextOutput("");
+    } else {
+      const items = transformBlankReports(text);
+      setListOutput(items);
+      setTextOutput("");
+      nextItemCount = Math.max(1, items.length);
+    }
+    setItemForms((prev: PerItemForm[]) => {
+      if (prev.length === nextItemCount) return prev;
+      return Array.from({ length: nextItemCount }, (_, i: number) => prev[i] ?? { ...EMPTY_ITEM_FORM });
+    });
+    setSelectedItem((prev: number) => Math.min(prev, Math.max(0, nextItemCount - 1)));
+    setCopiedIndex(null);
+    setEditedContents({});
+    setEditedTextOutput(null);
   };
 
   const handleTransform = () => {
@@ -3022,31 +3103,23 @@ export default function App() {
       showToast("입력이 비어있어요", "error");
       return;
     }
-    let nextItemCount = 1;
-    if (mode === "inspection") {
-      const out = transformInspectionText(inputText);
-      setTextOutput(out);
-      setListOutput([]);
-      nextItemCount = Math.max(1, countInspectionItems(out));
-    } else if (mode === "air-purifier") {
-      setTextOutput(transformAirPurifierText(inputText));
-      setListOutput([]);
-    } else if (mode === "samsung-note") {
-      setListOutput(transformSamsungNoteTitles(inputText));
-      setTextOutput("");
-    } else {
-      const items = transformBlankReports(inputText);
-      setListOutput(items);
-      setTextOutput("");
-      nextItemCount = Math.max(1, items.length);
-    }
-    setItemForms(Array.from({ length: nextItemCount }, () => ({ ...EMPTY_ITEM_FORM })));
-    setSharedForm(EMPTY_SHARED_FORM);
-    setSelectedItem(0);
-    setCopiedIndex(null);
-    setEditedContents({});
-    setEditedTextOutput(null);
+    runTransform(inputText, mode);
   };
+
+  // Auto-transform on input or mode change (debounced)
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      if (!inputText.trim()) {
+        resetOutputs();
+        setItemForms([{ ...EMPTY_ITEM_FORM }]);
+        setSharedForm(EMPTY_SHARED_FORM);
+        setSelectedItem(0);
+        return;
+      }
+      runTransform(inputText, mode);
+    }, 200);
+    return () => window.clearTimeout(handle);
+  }, [inputText, mode]);
 
   const handlePaste = async () => {
     const text = await pasteFromClipboard();
@@ -3181,6 +3254,7 @@ export default function App() {
             shared={sharedForm}
             setSharedF={setSharedF}
             itemCount={itemForms.length}
+            itemLabels={itemLabels}
             selectedItem={selectedItem}
             setSelectedItem={setSelectedItem}
             accent={config.accent}
