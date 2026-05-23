@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 
 type Mode = "inspection" | "blank-report" | "air-purifier" | "samsung-note";
 
@@ -1355,7 +1355,7 @@ function formatPrinterReport(f: PrinterReportFields): string {
     "매수:흑- 컬- 큰컬- 합-",
     "토너잔량:K- C- M- Y-",
     "폐통:  %",
-    "여분:  K- C- M- Y- 토너 SET  폐-",
+    "여분:  K- C- M- Y- 폐-",
     "한틴이카유무:",
     "주차비지원유무:",
     "특이사항:",
@@ -1857,6 +1857,418 @@ function runSelfTests(): TestResult[] {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Processing form (미양식 mode) — manual entry for printer service details
+// ────────────────────────────────────────────────────────────────────────────
+
+type ProcessingForm = {
+  mailBlack: string;
+  mailColor: string;
+  mailLargeColor: string;
+  mailTotal: string;
+  tonerK: string;
+  tonerC: string;
+  tonerM: string;
+  tonerY: string;
+  waste: string;
+  spareK: string;
+  spareC: string;
+  spareM: string;
+  spareY: string;
+  spareWaste: string;
+  hantin: string;
+  parkingChip: string;
+  parkingCustom: string;
+  notes: string;
+  warranty: string;
+  cumCount: string;
+  expectedCount: string;
+  partName: string;
+  partQty: string;
+  partShipped: string;
+  selfItem: string;
+  selfQty: string;
+  selfShipped: string;
+  arrival: string;
+  duration: string;
+};
+
+const EMPTY_FORM: ProcessingForm = {
+  mailBlack: "", mailColor: "", mailLargeColor: "", mailTotal: "",
+  tonerK: "", tonerC: "", tonerM: "", tonerY: "",
+  waste: "",
+  spareK: "", spareC: "", spareM: "", spareY: "", spareWaste: "",
+  hantin: "",
+  parkingChip: "", parkingCustom: "",
+  notes: "",
+  warranty: "", cumCount: "", expectedCount: "",
+  partName: "", partQty: "", partShipped: "",
+  selfItem: "", selfQty: "", selfShipped: "",
+  arrival: "", duration: "",
+};
+
+function dash(v: string): string {
+  return v.trim() ? v.trim() : "-";
+}
+
+function suffixIfValue(label: string, v: string): string {
+  return v.trim() ? `${label} ${v.trim()}` : label;
+}
+
+function applyProcessingForm(text: string, f: ProcessingForm): string {
+  let section: "" | "parts" | "self" = "";
+  const parkingValue = f.parkingCustom.trim() || f.parkingChip;
+
+  return text.split("\n").map((line: string) => {
+    if (/^※부품신청※/.test(line)) { section = "parts"; return line; }
+    if (/^※자가신청※/.test(line)) { section = "self"; return line; }
+
+    if (/^매수\s*:/.test(line)) {
+      return `매수:흑${dash(f.mailBlack)} 컬${dash(f.mailColor)} 큰컬${dash(f.mailLargeColor)} 합${dash(f.mailTotal)}`;
+    }
+    if (/^토너잔량\s*:/.test(line)) {
+      return `토너잔량:K${dash(f.tonerK)} C${dash(f.tonerC)} M${dash(f.tonerM)} Y${dash(f.tonerY)}`;
+    }
+    if (/^폐통\s*:/.test(line)) {
+      return f.waste.trim() ? `폐통: ${f.waste.trim()}%` : "폐통:  %";
+    }
+    if (/^여분\s*:/.test(line)) {
+      return `여분:  K${dash(f.spareK)} C${dash(f.spareC)} M${dash(f.spareM)} Y${dash(f.spareY)} 폐${dash(f.spareWaste)}`;
+    }
+    if (/^한틴이카유무\s*:/.test(line)) {
+      return suffixIfValue("한틴이카유무:", f.hantin);
+    }
+    if (/^주차비지원유무\s*:/.test(line)) {
+      return suffixIfValue("주차비지원유무:", parkingValue);
+    }
+    if (/^특이사항\s*:/.test(line)) {
+      return suffixIfValue("특이사항:", f.notes);
+    }
+    if (/^보증기간 내 여부\s*:/.test(line)) {
+      return f.warranty.trim() ? `보증기간 내 여부 : ${f.warranty.trim()}` : "보증기간 내 여부 :";
+    }
+    if (/^교체 전 카운터 누적 사용매수\s*:/.test(line)) {
+      return f.cumCount.trim() ? `교체 전 카운터 누적 사용매수 : ${f.cumCount.trim()}` : "교체 전 카운터 누적 사용매수 :";
+    }
+    if (/^사용 부품 예상 사용매수\s*:/.test(line)) {
+      return f.expectedCount.trim() ? `사용 부품 예상 사용매수 : ${f.expectedCount.trim()}` : "사용 부품 예상 사용매수 :";
+    }
+    if (/^물품명\s*:/.test(line)) {
+      return suffixIfValue("물품명:", f.partName);
+    }
+    if (/^물품\s*:/.test(line) && section === "self") {
+      return suffixIfValue("물품:", f.selfItem);
+    }
+    if (/^수량\s*:/.test(line)) {
+      const v = section === "self" ? f.selfQty : f.partQty;
+      return suffixIfValue("수량:", v);
+    }
+    if (/^출고여부\s*:/.test(line)) {
+      const v = section === "self" ? f.selfShipped : f.partShipped;
+      return suffixIfValue("출고여부:", v);
+    }
+    if (/^도착 시간\s*:/.test(line)) {
+      return suffixIfValue("도착 시간:", f.arrival);
+    }
+    if (/^소요 시간\s*:/.test(line)) {
+      return suffixIfValue("소요 시간:", f.duration);
+    }
+    return line;
+  }).join("\n");
+}
+
+const TONER_OPTIONS = ["10", "20", "30", "40", "50", "60", "70", "80", "90", "100"];
+const WASTE_OPTIONS = ["10", "20", "30", "40", "50", "60", "70", "80", "90", "100"];
+const SPARE_OPTIONS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+const HANTIN_OPTIONS = ["한공", "한조", "보안으로 설치불가", "고객불편으로 설치불가", "무"];
+const PARKING_OPTIONS = ["유", "무"];
+
+type ChipRowProps = {
+  options: string[];
+  value: string;
+  onSelect: (v: string) => void;
+  accent: string;
+};
+
+function ChipRow({ options, value, onSelect, accent }: ChipRowProps) {
+  return (
+    <div className="flex gap-1 overflow-x-auto py-0.5">
+      {options.map((opt: string) => {
+        const active = value === opt;
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onSelect(opt)}
+            className="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition active:scale-95"
+            style={{
+              background: active ? accent : "#F1F5F9",
+              color: active ? "white" : "#334155",
+            }}
+          >
+            {opt}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+type FormFieldRowProps = {
+  label: string;
+  children: ReactNode;
+};
+
+function FieldRow({ label, children }: FormFieldRowProps) {
+  return (
+    <div className="flex items-center gap-2 py-1">
+      <span className="w-6 shrink-0 text-xs font-semibold text-slate-500">{label}</span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+type ProcessingFormPanelProps = {
+  form: ProcessingForm;
+  setF: <K extends keyof ProcessingForm>(key: K, value: ProcessingForm[K]) => void;
+  toggleF: (key: keyof ProcessingForm, value: string) => void;
+  accent: string;
+  bgSoft: string;
+};
+
+function ProcessingFormPanel({ form, setF, toggleF, accent, bgSoft }: ProcessingFormPanelProps) {
+  const numInputClass =
+    "w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white";
+  const textInputClass =
+    "w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white";
+
+  return (
+    <section className="mb-3 rounded-2xl bg-white p-3 shadow-sm sm:p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <label className="text-xs font-medium text-slate-600">처리내용 입력</label>
+        <span className="text-[10px] text-slate-400">입력 즉시 결과에 반영</span>
+      </div>
+
+      {/* 매수 */}
+      <div className="mb-2">
+        <div className="mb-1 text-xs font-semibold text-slate-700">매수</div>
+        <div className="grid grid-cols-4 gap-1.5">
+          <input
+            inputMode="numeric"
+            placeholder="흑"
+            value={form.mailBlack}
+            onChange={(e) => setF("mailBlack", e.target.value)}
+            className={numInputClass}
+          />
+          <input
+            inputMode="numeric"
+            placeholder="컬"
+            value={form.mailColor}
+            onChange={(e) => setF("mailColor", e.target.value)}
+            className={numInputClass}
+          />
+          <input
+            inputMode="numeric"
+            placeholder="큰컬"
+            value={form.mailLargeColor}
+            onChange={(e) => setF("mailLargeColor", e.target.value)}
+            className={numInputClass}
+          />
+          <input
+            inputMode="numeric"
+            placeholder="합"
+            value={form.mailTotal}
+            onChange={(e) => setF("mailTotal", e.target.value)}
+            className={numInputClass}
+          />
+        </div>
+      </div>
+
+      {/* 토너잔량 */}
+      <div className="mb-2 rounded-xl p-2" style={{ background: bgSoft }}>
+        <div className="mb-1 text-xs font-semibold text-slate-700">토너잔량 (%)</div>
+        <FieldRow label="K">
+          <ChipRow options={TONER_OPTIONS} value={form.tonerK} onSelect={(v) => toggleF("tonerK", v)} accent={accent} />
+        </FieldRow>
+        <FieldRow label="C">
+          <ChipRow options={TONER_OPTIONS} value={form.tonerC} onSelect={(v) => toggleF("tonerC", v)} accent={accent} />
+        </FieldRow>
+        <FieldRow label="M">
+          <ChipRow options={TONER_OPTIONS} value={form.tonerM} onSelect={(v) => toggleF("tonerM", v)} accent={accent} />
+        </FieldRow>
+        <FieldRow label="Y">
+          <ChipRow options={TONER_OPTIONS} value={form.tonerY} onSelect={(v) => toggleF("tonerY", v)} accent={accent} />
+        </FieldRow>
+      </div>
+
+      {/* 폐통 */}
+      <div className="mb-2">
+        <div className="mb-1 text-xs font-semibold text-slate-700">폐통 (%)</div>
+        <ChipRow options={WASTE_OPTIONS} value={form.waste} onSelect={(v) => toggleF("waste", v)} accent={accent} />
+      </div>
+
+      {/* 여분 */}
+      <div className="mb-2 rounded-xl p-2" style={{ background: bgSoft }}>
+        <div className="mb-1 text-xs font-semibold text-slate-700">여분</div>
+        <FieldRow label="K">
+          <ChipRow options={SPARE_OPTIONS} value={form.spareK} onSelect={(v) => toggleF("spareK", v)} accent={accent} />
+        </FieldRow>
+        <FieldRow label="C">
+          <ChipRow options={SPARE_OPTIONS} value={form.spareC} onSelect={(v) => toggleF("spareC", v)} accent={accent} />
+        </FieldRow>
+        <FieldRow label="M">
+          <ChipRow options={SPARE_OPTIONS} value={form.spareM} onSelect={(v) => toggleF("spareM", v)} accent={accent} />
+        </FieldRow>
+        <FieldRow label="Y">
+          <ChipRow options={SPARE_OPTIONS} value={form.spareY} onSelect={(v) => toggleF("spareY", v)} accent={accent} />
+        </FieldRow>
+        <FieldRow label="폐">
+          <ChipRow options={SPARE_OPTIONS} value={form.spareWaste} onSelect={(v) => toggleF("spareWaste", v)} accent={accent} />
+        </FieldRow>
+      </div>
+
+      {/* 한틴이카 */}
+      <div className="mb-2">
+        <div className="mb-1 text-xs font-semibold text-slate-700">한틴이카유무</div>
+        <div className="flex flex-wrap gap-1">
+          {HANTIN_OPTIONS.map((opt: string) => {
+            const active = form.hantin === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => toggleF("hantin", opt)}
+                className="rounded-full px-2.5 py-1 text-xs font-medium transition active:scale-95"
+                style={{
+                  background: active ? accent : "#F1F5F9",
+                  color: active ? "white" : "#334155",
+                }}
+              >
+                {opt}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 주차비 */}
+      <div className="mb-2">
+        <div className="mb-1 text-xs font-semibold text-slate-700">주차비지원유무</div>
+        <div className="flex flex-wrap items-center gap-1">
+          {PARKING_OPTIONS.map((opt: string) => {
+            const active = form.parkingChip === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => {
+                  toggleF("parkingChip", opt);
+                  if (form.parkingChip !== opt) setF("parkingCustom", "");
+                }}
+                className="rounded-full px-3 py-1 text-xs font-medium transition active:scale-95"
+                style={{
+                  background: active ? accent : "#F1F5F9",
+                  color: active ? "white" : "#334155",
+                }}
+              >
+                {opt}
+              </button>
+            );
+          })}
+          <input
+            type="text"
+            placeholder="직접 입력 (우선 적용)"
+            value={form.parkingCustom}
+            onChange={(e) => {
+              setF("parkingCustom", e.target.value);
+              if (e.target.value) setF("parkingChip", "");
+            }}
+            className="ml-1 min-w-0 flex-1 rounded-lg bg-slate-50 px-2 py-1.5 text-xs outline-none focus:bg-white"
+          />
+        </div>
+      </div>
+
+      {/* 특이사항 */}
+      <div className="mb-3">
+        <div className="mb-1 text-xs font-semibold text-slate-700">특이사항</div>
+        <textarea
+          value={form.notes}
+          onChange={(e) => setF("notes", e.target.value)}
+          rows={2}
+          className="w-full resize-none rounded-lg bg-slate-50 p-2 text-sm outline-none focus:bg-white"
+        />
+      </div>
+
+      {/* 부품신청 */}
+      <div className="mb-3 rounded-xl border border-slate-200 p-2">
+        <div className="mb-2 text-xs font-bold text-slate-700">※ 부품신청 ※</div>
+        <div className="space-y-1.5">
+          <div>
+            <div className="text-[11px] text-slate-500">보증기간 내 여부</div>
+            <input value={form.warranty} onChange={(e) => setF("warranty", e.target.value)} className={textInputClass} />
+          </div>
+          <div>
+            <div className="text-[11px] text-slate-500">교체 전 카운터 누적 사용매수</div>
+            <input value={form.cumCount} onChange={(e) => setF("cumCount", e.target.value)} inputMode="numeric" className={textInputClass} />
+          </div>
+          <div>
+            <div className="text-[11px] text-slate-500">사용 부품 예상 사용매수</div>
+            <input value={form.expectedCount} onChange={(e) => setF("expectedCount", e.target.value)} inputMode="numeric" className={textInputClass} />
+          </div>
+          <div className="pt-1 text-[11px] font-semibold text-slate-600">▶ 신청 부품</div>
+          <div>
+            <div className="text-[11px] text-slate-500">물품명</div>
+            <input value={form.partName} onChange={(e) => setF("partName", e.target.value)} className={textInputClass} />
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <div className="text-[11px] text-slate-500">수량</div>
+              <input value={form.partQty} onChange={(e) => setF("partQty", e.target.value)} inputMode="numeric" className={textInputClass} />
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500">출고여부</div>
+              <input value={form.partShipped} onChange={(e) => setF("partShipped", e.target.value)} className={textInputClass} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 자가신청 */}
+      <div className="mb-3 rounded-xl border border-slate-200 p-2">
+        <div className="mb-2 text-xs font-bold text-slate-700">※ 자가신청 ※</div>
+        <div className="space-y-1.5">
+          <div>
+            <div className="text-[11px] text-slate-500">물품</div>
+            <input value={form.selfItem} onChange={(e) => setF("selfItem", e.target.value)} className={textInputClass} />
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <div className="text-[11px] text-slate-500">수량</div>
+              <input value={form.selfQty} onChange={(e) => setF("selfQty", e.target.value)} inputMode="numeric" className={textInputClass} />
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500">출고여부</div>
+              <input value={form.selfShipped} onChange={(e) => setF("selfShipped", e.target.value)} className={textInputClass} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 시간 */}
+      <div className="grid grid-cols-2 gap-1.5">
+        <div>
+          <div className="text-[11px] text-slate-500">도착 시간</div>
+          <input value={form.arrival} onChange={(e) => setF("arrival", e.target.value)} className={textInputClass} />
+        </div>
+        <div>
+          <div className="text-[11px] text-slate-500">소요 시간</div>
+          <input value={form.duration} onChange={(e) => setF("duration", e.target.value)} className={textInputClass} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Main component
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -1867,9 +2279,29 @@ export default function App() {
   const [listOutput, setListOutput] = useState<ResultItem[]>([]);
   const [toast, setToast] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [form, setForm] = useState<ProcessingForm>(EMPTY_FORM);
 
   const config = MODE_CONFIG[mode];
   const isListMode = mode === "samsung-note" || mode === "blank-report";
+  const showForm = mode === "blank-report";
+
+  const displayedList = useMemo(() => {
+    if (mode !== "blank-report") return listOutput;
+    return listOutput.map((item: ResultItem) => ({
+      ...item,
+      content: applyProcessingForm(item.content, form),
+    }));
+  }, [mode, listOutput, form]);
+
+  const setF = <K extends keyof ProcessingForm>(key: K, value: ProcessingForm[K]) => {
+    setForm((prev: ProcessingForm) => ({ ...prev, [key]: value }));
+  };
+  const toggleF = (key: keyof ProcessingForm, value: string) => {
+    setForm((prev: ProcessingForm) => ({
+      ...prev,
+      [key]: prev[key] === value ? "" : value,
+    }));
+  };
 
   const lineStats = useMemo(() => {
     const count = inputText ? inputText.split(/\r?\n/).length : 0;
@@ -1936,7 +2368,7 @@ export default function App() {
 
   const handleCopyAll = async () => {
     const target = isListMode
-      ? listOutput.map((item: ResultItem) => item.content).join("\n\n")
+      ? displayedList.map((item: ResultItem) => item.content).join("\n\n")
       : textOutput;
 
     if (!target) {
@@ -1951,6 +2383,7 @@ export default function App() {
   const handleReset = () => {
     setInputText("");
     resetOutputs();
+    setForm(EMPTY_FORM);
     showToast("초기화 완료");
   };
 
@@ -1962,7 +2395,7 @@ export default function App() {
   };
 
   const hasOutput = textOutput.length > 0 || listOutput.length > 0;
-  const warningCount = listOutput.filter((item: ResultItem) => item.warning).length;
+  const warningCount = displayedList.filter((item: ResultItem) => item.warning).length;
 
   const isDev = typeof import.meta !== "undefined" && import.meta.env && import.meta.env.DEV;
   const testResults = useMemo(() => (isDev ? runSelfTests() : []), [isDev]);
@@ -2033,6 +2466,17 @@ export default function App() {
           />
         </section>
 
+        {/* Processing form — only for 미양식 */}
+        {showForm && (
+          <ProcessingFormPanel
+            form={form}
+            setF={setF}
+            toggleF={toggleF}
+            accent={config.accent}
+            bgSoft={config.bgSoft}
+          />
+        )}
+
         {/* Results */}
         {hasOutput && (
           <section className="mb-3">
@@ -2041,7 +2485,7 @@ export default function App() {
                 결과{" "}
                 {isListMode && (
                   <>
-                    <span className="text-slate-400">· {listOutput.length}건</span>
+                    <span className="text-slate-400">· {displayedList.length}건</span>
                     {warningCount > 0 && (
                       <span className="ml-1 text-amber-600">⚠️ {warningCount}건 확인 필요</span>
                     )}
@@ -2059,7 +2503,7 @@ export default function App() {
 
             {isListMode ? (
               <div className="space-y-2">
-                {listOutput.map((item: ResultItem, index: number) => {
+                {displayedList.map((item: ResultItem, index: number) => {
                   const hasWarning = Boolean(item.warning);
                   const isCopied = copiedIndex === index;
                   const cardBg = isCopied
