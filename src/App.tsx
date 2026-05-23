@@ -1962,12 +1962,6 @@ function parseToner(line: string): { K: string; C: string; M: string; Y: string 
   return { K: normToken(m[1]), C: normToken(m[2]), M: normToken(m[3]), Y: normToken(m[4]) };
 }
 
-function parseSpare(line: string): { K: string; C: string; M: string; Y: string; waste: string } {
-  const m = line.match(/^여분\s*:\s*K(\S*)\s+C(\S*)\s+M(\S*)\s+Y(\S*)\s+폐(\S*)/);
-  if (!m) return { K: "", C: "", M: "", Y: "", waste: "" };
-  return { K: normToken(m[1]), C: normToken(m[2]), M: normToken(m[3]), Y: normToken(m[4]), waste: normToken(m[5]) };
-}
-
 function parseValueAfterColon(line: string, label: string): string {
   const re = new RegExp(`^${label}\\s*:\\s*(.*)$`);
   const m = line.match(re);
@@ -2004,13 +1998,17 @@ function mergeWasteLine(line: string, f: PerItemForm): string {
 function mergeSpareLine(line: string, f: PerItemForm): string {
   const formHasAny = !!(f.spareK.trim() || f.spareC.trim() || f.spareM.trim() || f.spareY.trim() || f.spareWaste.trim());
   if (!formHasAny) return line;
-  const p = parseSpare(line);
+  const m = line.match(/^여분\s*:\s*K(\S*)\s+C(\S*)\s+M(\S*)\s+Y(\S*)\s+폐(\S*)(.*)$/);
+  const p = m
+    ? { K: normToken(m[1]), C: normToken(m[2]), M: normToken(m[3]), Y: normToken(m[4]), waste: normToken(m[5]) }
+    : { K: "", C: "", M: "", Y: "", waste: "" };
+  const trailing = m ? m[6] : "";
   const K = f.spareK.trim() || p.K;
   const C = f.spareC.trim() || p.C;
   const M = f.spareM.trim() || p.M;
   const Y = f.spareY.trim() || p.Y;
   const waste = f.spareWaste.trim() || p.waste;
-  return `여분:  K${dashIfEmpty(K)} C${dashIfEmpty(C)} M${dashIfEmpty(M)} Y${dashIfEmpty(Y)} 폐${dashIfEmpty(waste)}`;
+  return `여분:  K${dashIfEmpty(K)} C${dashIfEmpty(C)} M${dashIfEmpty(M)} Y${dashIfEmpty(Y)} 폐${dashIfEmpty(waste)}${trailing}`;
 }
 
 function applyProcessingFormV2(
@@ -2438,6 +2436,7 @@ type ProcessingFormPanelProps = {
   author: string;
   setAuthor: (v: string) => void;
   showLevel: boolean;
+  showHantinParking: boolean;
 };
 
 function ProcessingFormPanel({
@@ -2445,7 +2444,7 @@ function ProcessingFormPanel({
   shared, setSharedF,
   itemCount, itemLabels, selectedItem, setSelectedItem,
   accent, bgSoft,
-  author, setAuthor, showLevel,
+  author, setAuthor, showLevel, showHantinParking,
 }: ProcessingFormPanelProps) {
   const numInputClass =
     "w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white";
@@ -2619,66 +2618,70 @@ function ProcessingFormPanel({
         </FieldRow>
       </div>
 
-      {/* 한틴이카 */}
-      <div className="mb-2">
-        <div className="mb-1 text-xs font-semibold text-slate-700">한틴이카유무</div>
-        <div className="flex flex-wrap gap-1">
-          {HANTIN_OPTIONS.map((opt: string) => {
-            const active = itemForm.hantin === opt;
-            return (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => toggleItemF("hantin", opt)}
-                className="rounded-full px-2.5 py-1 text-xs font-medium transition active:scale-95"
-                style={{
-                  background: active ? accent : "#F1F5F9",
-                  color: active ? "white" : "#334155",
-                }}
-              >
-                {opt}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {showHantinParking && (
+        <>
+          {/* 한틴이카 */}
+          <div className="mb-2">
+            <div className="mb-1 text-xs font-semibold text-slate-700">한틴이카유무</div>
+            <div className="flex flex-wrap gap-1">
+              {HANTIN_OPTIONS.map((opt: string) => {
+                const active = itemForm.hantin === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => toggleItemF("hantin", opt)}
+                    className="rounded-full px-2.5 py-1 text-xs font-medium transition active:scale-95"
+                    style={{
+                      background: active ? accent : "#F1F5F9",
+                      color: active ? "white" : "#334155",
+                    }}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-      {/* 주차비 */}
-      <div className="mb-2">
-        <div className="mb-1 text-xs font-semibold text-slate-700">주차비지원유무</div>
-        <div className="flex flex-wrap items-center gap-1">
-          {PARKING_OPTIONS.map((opt: string) => {
-            const active = itemForm.parkingChip === opt;
-            return (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => {
-                  toggleItemF("parkingChip", opt);
-                  if (itemForm.parkingChip !== opt) setItemF("parkingCustom", "");
+          {/* 주차비 */}
+          <div className="mb-2">
+            <div className="mb-1 text-xs font-semibold text-slate-700">주차비지원유무</div>
+            <div className="flex flex-wrap items-center gap-1">
+              {PARKING_OPTIONS.map((opt: string) => {
+                const active = itemForm.parkingChip === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => {
+                      toggleItemF("parkingChip", opt);
+                      if (itemForm.parkingChip !== opt) setItemF("parkingCustom", "");
+                    }}
+                    className="rounded-full px-3 py-1 text-xs font-medium transition active:scale-95"
+                    style={{
+                      background: active ? accent : "#F1F5F9",
+                      color: active ? "white" : "#334155",
+                    }}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
+              <input
+                type="text"
+                placeholder="직접 입력 (우선 적용)"
+                value={itemForm.parkingCustom}
+                onChange={(e) => {
+                  setItemF("parkingCustom", e.target.value);
+                  if (e.target.value) setItemF("parkingChip", "");
                 }}
-                className="rounded-full px-3 py-1 text-xs font-medium transition active:scale-95"
-                style={{
-                  background: active ? accent : "#F1F5F9",
-                  color: active ? "white" : "#334155",
-                }}
-              >
-                {opt}
-              </button>
-            );
-          })}
-          <input
-            type="text"
-            placeholder="직접 입력 (우선 적용)"
-            value={itemForm.parkingCustom}
-            onChange={(e) => {
-              setItemF("parkingCustom", e.target.value);
-              if (e.target.value) setItemF("parkingChip", "");
-            }}
-            className="ml-1 min-w-0 flex-1 rounded-lg bg-slate-50 px-2 py-1.5 text-xs outline-none focus:bg-white"
-          />
-        </div>
-      </div>
+                className="ml-1 min-w-0 flex-1 rounded-lg bg-slate-50 px-2 py-1.5 text-xs outline-none focus:bg-white"
+              />
+            </div>
+          </div>
+        </>
+      )}
 
       {/* 특이사항 */}
       <div className="mb-3">
@@ -3263,6 +3266,7 @@ export default function App() {
             author={author}
             setAuthor={setAuthor}
             showLevel={mode === "blank-report"}
+            showHantinParking={mode === "blank-report"}
           />
         )}
 
