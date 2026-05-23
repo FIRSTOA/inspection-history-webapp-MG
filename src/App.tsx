@@ -1878,6 +1878,7 @@ type PerItemForm = {
   spareM: string;
   spareY: string;
   spareWaste: string;
+  spareDrum: string;
   hantin: string;
   parkingChip: string;
   parkingCustom: string;
@@ -1889,7 +1890,7 @@ const EMPTY_ITEM_FORM: PerItemForm = {
   mailBlack: "", mailColor: "", mailLargeColor: "", mailTotal: "",
   tonerK: "", tonerC: "", tonerM: "", tonerY: "",
   waste: "",
-  spareK: "", spareC: "", spareM: "", spareY: "", spareWaste: "",
+  spareK: "", spareC: "", spareM: "", spareY: "", spareWaste: "", spareDrum: "",
   hantin: "",
   parkingChip: "", parkingCustom: "",
   notes: "",
@@ -2014,26 +2015,34 @@ function mergeSpareLine(line: string, f: PerItemForm): string {
 // Replaces only the numeric value of a single channel marker in-place,
 // leaving prefixes (토너/드럼), separators, location notes, and unknown
 // tokens untouched. Used for 점검 mode where 여분 lines are free-form.
-function setChannelValue(line: string, letter: string, value: string): string {
-  const flags = /[A-Za-z]/.test(letter) ? "i" : "";
-  const withDigits = new RegExp(`(${letter}\\s*-?\\s*)\\d+`, flags);
-  if (withDigits.test(line)) {
-    return line.replace(withDigits, `$1${value}`);
+// `aliases` lets one form field target multiple markers (e.g. K also
+// matches a bare 토너 on a mono printer that has no explicit K).
+function setChannelValue(line: string, aliases: string[], value: string): string {
+  for (const letter of aliases) {
+    const flags = /[A-Za-z]/.test(letter) ? "i" : "";
+    const withDigits = new RegExp(`(${letter}\\s*-?\\s*)\\d+`, flags);
+    if (withDigits.test(line)) {
+      return line.replace(withDigits, `$1${value}`);
+    }
   }
-  const placeholder = new RegExp(`(${letter})(\\s*-)`, flags);
-  if (placeholder.test(line)) {
-    return line.replace(placeholder, `$1$2${value}`);
+  for (const letter of aliases) {
+    const flags = /[A-Za-z]/.test(letter) ? "i" : "";
+    const placeholder = new RegExp(`(${letter})(\\s*-)`, flags);
+    if (placeholder.test(line)) {
+      return line.replace(placeholder, `$1$2${value}`);
+    }
   }
   return line;
 }
 
 function mergeSpareInPlace(line: string, f: PerItemForm): string {
   let result = line;
-  if (f.spareK.trim()) result = setChannelValue(result, "K", f.spareK.trim());
-  if (f.spareC.trim()) result = setChannelValue(result, "C", f.spareC.trim());
-  if (f.spareM.trim()) result = setChannelValue(result, "M", f.spareM.trim());
-  if (f.spareY.trim()) result = setChannelValue(result, "Y", f.spareY.trim());
-  if (f.spareWaste.trim()) result = setChannelValue(result, "폐", f.spareWaste.trim());
+  if (f.spareK.trim()) result = setChannelValue(result, ["K", "토너"], f.spareK.trim());
+  if (f.spareC.trim()) result = setChannelValue(result, ["C"], f.spareC.trim());
+  if (f.spareM.trim()) result = setChannelValue(result, ["M"], f.spareM.trim());
+  if (f.spareY.trim()) result = setChannelValue(result, ["Y"], f.spareY.trim());
+  if (f.spareWaste.trim()) result = setChannelValue(result, ["폐"], f.spareWaste.trim());
+  if (f.spareDrum.trim()) result = setChannelValue(result, ["드럼"], f.spareDrum.trim());
   return result;
 }
 
@@ -2464,6 +2473,7 @@ type ProcessingFormPanelProps = {
   setAuthor: (v: string) => void;
   showLevel: boolean;
   showHantinParking: boolean;
+  showDrum: boolean;
 };
 
 function ProcessingFormPanel({
@@ -2471,7 +2481,7 @@ function ProcessingFormPanel({
   shared, setSharedF,
   itemCount, itemLabels, selectedItem, setSelectedItem,
   accent, bgSoft,
-  author, setAuthor, showLevel, showHantinParking,
+  author, setAuthor, showLevel, showHantinParking, showDrum,
 }: ProcessingFormPanelProps) {
   const numInputClass =
     "w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white";
@@ -2643,6 +2653,11 @@ function ProcessingFormPanel({
         <FieldRow label="폐">
           <NumSelect value={itemForm.spareWaste} onChange={(v) => setItemF("spareWaste", v)} options={SPARE_OPTIONS} accent={accent} />
         </FieldRow>
+        {showDrum && (
+          <FieldRow label="드럼">
+            <NumSelect value={itemForm.spareDrum} onChange={(v) => setItemF("spareDrum", v)} options={SPARE_OPTIONS} accent={accent} />
+          </FieldRow>
+        )}
       </div>
 
       {showHantinParking && (
@@ -3294,6 +3309,7 @@ export default function App() {
             setAuthor={setAuthor}
             showLevel={mode === "blank-report"}
             showHantinParking={mode === "blank-report"}
+            showDrum={mode === "inspection"}
           />
         )}
 
