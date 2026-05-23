@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 type Mode = "inspection" | "blank-report" | "air-purifier" | "samsung-note";
@@ -1861,6 +1861,7 @@ function runSelfTests(): TestResult[] {
 // ────────────────────────────────────────────────────────────────────────────
 
 type ProcessingForm = {
+  level: string;
   processContent: string;
   mailBlack: string;
   mailColor: string;
@@ -1895,6 +1896,7 @@ type ProcessingForm = {
 };
 
 const EMPTY_FORM: ProcessingForm = {
+  level: "",
   processContent: "",
   mailBlack: "", mailColor: "", mailLargeColor: "", mailTotal: "",
   tonerK: "", tonerC: "", tonerM: "", tonerY: "",
@@ -1909,6 +1911,30 @@ const EMPTY_FORM: ProcessingForm = {
   arrivalHour: "", arrivalMinute: "", duration: "",
 };
 
+type AuthorTeam = "A" | "B" | "C" | "D";
+const AUTHOR_TEAMS: AuthorTeam[] = ["A", "B", "C", "D"];
+type AuthorBook = Record<AuthorTeam, string[]>;
+
+const EMPTY_AUTHOR_BOOK: AuthorBook = { A: [], B: [], C: [], D: [] };
+
+type AirPurifierForm = {
+  filterReset: string;
+  filterChange: string;
+  notes: string;
+  arrivalHour: string;
+  arrivalMinute: string;
+  duration: string;
+};
+
+const EMPTY_AIR_FORM: AirPurifierForm = {
+  filterReset: "",
+  filterChange: "",
+  notes: "",
+  arrivalHour: "",
+  arrivalMinute: "",
+  duration: "",
+};
+
 function dash(v: string): string {
   return v.trim() ? v.trim() : "-";
 }
@@ -1917,7 +1943,7 @@ function suffixIfValue(label: string, v: string): string {
   return v.trim() ? `${label} ${v.trim()}` : label;
 }
 
-function applyProcessingForm(text: string, f: ProcessingForm): string {
+function applyProcessingForm(text: string, f: ProcessingForm, author: string): string {
   let section: "" | "parts" | "self" = "";
   const parkingValue = f.parkingCustom.trim() || f.parkingChip;
 
@@ -1925,6 +1951,12 @@ function applyProcessingForm(text: string, f: ProcessingForm): string {
     if (/^※부품신청※/.test(line)) { section = "parts"; return line; }
     if (/^※자가신청※/.test(line)) { section = "self"; return line; }
 
+    if (/^작성자\s*:/.test(line)) {
+      return author.trim() ? line.replace(/^(작성자\s*:\s*).*/, `$1${author.trim()}`) : line;
+    }
+    if (/^레벨\s*:/.test(line)) {
+      return f.level.trim() ? line.replace(/^(레벨\s*:\s*).*/, `$1${f.level.trim()}`) : line;
+    }
     if (/^처리내용\s*:/.test(line)) {
       return f.processContent.trim() ? `처리내용: ${f.processContent.trim()}` : line;
     }
@@ -1986,6 +2018,34 @@ function applyProcessingForm(text: string, f: ProcessingForm): string {
   }).join("\n");
 }
 
+function applyAirPurifierForm(text: string, f: AirPurifierForm, author: string): string {
+  return text.split("\n").map((line: string) => {
+    if (/^작성자\s*:/.test(line)) {
+      return author.trim() ? line.replace(/^(작성자\s*:\s*).*/, `$1${author.trim()}`) : line;
+    }
+    if (/^필터리셋\s*:/.test(line)) {
+      return f.filterReset.trim() ? `필터리셋:${f.filterReset.trim()}` : "필터리셋:";
+    }
+    if (/^필터교체\s*:/.test(line)) {
+      return f.filterChange.trim() ? `필터교체:${f.filterChange.trim()}` : "필터교체:";
+    }
+    if (/^특이사항\s*:/.test(line)) {
+      return suffixIfValue("특이사항:", f.notes);
+    }
+    if (/^도착 시간\s*:/.test(line)) {
+      const arrival = f.arrivalHour
+        ? `${f.arrivalHour}:${f.arrivalMinute || "00"}`
+        : "";
+      return suffixIfValue("도착 시간:", arrival);
+    }
+    if (/^소요 시간\s*:/.test(line)) {
+      const duration = f.duration.trim() ? `${f.duration.trim()}분` : "";
+      return suffixIfValue("소요 시간:", duration);
+    }
+    return line;
+  }).join("\n");
+}
+
 const TONER_OPTIONS = ["10", "20", "30", "40", "50", "60", "70", "80", "90", "100"];
 const WASTE_OPTIONS = ["10", "20", "30", "40", "50", "60", "70", "80", "90", "100"];
 const SPARE_OPTIONS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
@@ -1995,6 +2055,8 @@ const SHIP_OPTIONS = ["출고부탁드립니다", "선출고완료"];
 const HOUR_OPTIONS = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"];
 const MINUTE_OPTIONS = ["00", "10", "20", "30", "40", "50"];
 const DURATION_STEPS = [1, 5, 10, 30, 60];
+const LEVEL_OPTIONS = ["1", "2", "3", "4", "5"];
+const YESNO_OPTIONS = ["유", "무"];
 
 const TONER_COLORS: Record<string, string> = {
   K: "#111827",
@@ -2095,6 +2157,161 @@ function NumSelect({ value, onChange, options, placeholder, accent, suffix }: Nu
   );
 }
 
+type AuthorPickerProps = {
+  value: string;
+  onChange: (v: string) => void;
+  authorBook: AuthorBook;
+  setAuthorBook: (next: AuthorBook) => void;
+  accent: string;
+};
+
+function AuthorPicker({ value, onChange, authorBook, setAuthorBook, accent }: AuthorPickerProps) {
+  const [open, setOpen] = useState(false);
+  const [team, setTeam] = useState<AuthorTeam>("A");
+  const [newName, setNewName] = useState("");
+  const filled = value !== "";
+
+  const addName = () => {
+    const name = newName.trim();
+    if (!name) return;
+    if (authorBook[team].includes(name)) {
+      setNewName("");
+      return;
+    }
+    setAuthorBook({ ...authorBook, [team]: [...authorBook[team], name] });
+    setNewName("");
+  };
+
+  const removeName = (name: string) => {
+    setAuthorBook({ ...authorBook, [team]: authorBook[team].filter((n: string) => n !== name) });
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm outline-none transition active:scale-[0.99]"
+        style={{
+          background: filled ? "white" : "#F1F5F9",
+          borderLeft: filled ? `3px solid ${accent}` : "3px solid transparent",
+          fontWeight: filled ? 600 : 400,
+          color: filled ? "#0F172A" : "#64748B",
+        }}
+      >
+        <span className="truncate">{filled ? value : "작성자 선택"}</span>
+        <span className="ml-1 text-[10px] text-slate-400">▾</span>
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-black/40"
+          onClick={() => setOpen(false)}
+          role="dialog"
+        >
+          <div
+            className="flex w-full flex-col rounded-t-2xl bg-white shadow-2xl"
+            style={{ maxHeight: "80vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <span className="text-sm font-semibold text-slate-700">작성자 선택</span>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-md px-2 py-1 text-xs text-slate-500"
+              >
+                닫기
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-1 border-b border-slate-100 px-3 py-2">
+              {AUTHOR_TEAMS.map((t: AuthorTeam) => {
+                const active = team === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTeam(t)}
+                    className="rounded-lg py-2 text-sm font-semibold transition active:scale-95"
+                    style={{
+                      background: active ? accent : "#F1F5F9",
+                      color: active ? "white" : "#334155",
+                    }}
+                  >
+                    {t}팀 ({authorBook[t].length})
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex-1 overflow-y-auto py-1">
+              {authorBook[team].length === 0 && (
+                <div className="px-5 py-6 text-center text-xs text-slate-400">
+                  등록된 이름이 없습니다. 아래에서 추가하세요.
+                </div>
+              )}
+              {authorBook[team].map((name: string) => {
+                const active = value === name;
+                return (
+                  <div
+                    key={name}
+                    className="flex items-center gap-1 border-b border-slate-50"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onChange(name);
+                        setOpen(false);
+                      }}
+                      className="flex-1 px-5 py-3 text-left text-sm transition active:bg-slate-100"
+                      style={{
+                        background: active ? accent : "transparent",
+                        color: active ? "white" : "#0F172A",
+                        fontWeight: active ? 600 : 400,
+                      }}
+                    >
+                      {name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeName(name)}
+                      className="mr-3 rounded-md px-2 py-1 text-xs text-rose-500 transition active:scale-95"
+                      aria-label={`${name} 삭제`}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2 border-t border-slate-100 p-3 pb-5">
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addName();
+                  }
+                }}
+                placeholder={`${team}팀에 이름 추가`}
+                className="flex-1 rounded-lg bg-slate-50 px-3 py-2 text-sm outline-none focus:bg-white"
+              />
+              <button
+                type="button"
+                onClick={addName}
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-white transition active:scale-95"
+                style={{ background: accent }}
+              >
+                추가
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 type FormFieldRowProps = {
   label: string;
   dotColor?: string;
@@ -2122,9 +2339,16 @@ type ProcessingFormPanelProps = {
   toggleF: (key: keyof ProcessingForm, value: string) => void;
   accent: string;
   bgSoft: string;
+  author: string;
+  setAuthor: (v: string) => void;
+  authorBook: AuthorBook;
+  setAuthorBook: (next: AuthorBook) => void;
 };
 
-function ProcessingFormPanel({ form, setF, toggleF, accent, bgSoft }: ProcessingFormPanelProps) {
+function ProcessingFormPanel({
+  form, setF, toggleF, accent, bgSoft,
+  author, setAuthor, authorBook, setAuthorBook,
+}: ProcessingFormPanelProps) {
   const numInputClass =
     "w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white";
   const textInputClass =
@@ -2135,6 +2359,30 @@ function ProcessingFormPanel({ form, setF, toggleF, accent, bgSoft }: Processing
       <div className="mb-2 flex items-center justify-between">
         <label className="text-xs font-medium text-slate-600">처리내용 입력</label>
         <span className="text-[10px] text-slate-400">입력 즉시 결과에 반영</span>
+      </div>
+
+      {/* 작성자 / 레벨 */}
+      <div className="mb-2 grid grid-cols-[1fr_auto] gap-2">
+        <div>
+          <div className="mb-1 text-xs font-semibold text-slate-700">작성자</div>
+          <AuthorPicker
+            value={author}
+            onChange={setAuthor}
+            authorBook={authorBook}
+            setAuthorBook={setAuthorBook}
+            accent={accent}
+          />
+        </div>
+        <div className="w-24">
+          <div className="mb-1 text-xs font-semibold text-slate-700">레벨</div>
+          <NumSelect
+            value={form.level}
+            onChange={(v) => setF("level", v)}
+            options={LEVEL_OPTIONS}
+            placeholder="-"
+            accent={accent}
+          />
+        </div>
       </div>
 
       {/* 처리내용 */}
@@ -2459,6 +2707,144 @@ function ProcessingFormPanel({ form, setF, toggleF, accent, bgSoft }: Processing
   );
 }
 
+type AirPurifierFormPanelProps = {
+  form: AirPurifierForm;
+  setAirF: <K extends keyof AirPurifierForm>(key: K, value: AirPurifierForm[K]) => void;
+  accent: string;
+  author: string;
+  setAuthor: (v: string) => void;
+  authorBook: AuthorBook;
+  setAuthorBook: (next: AuthorBook) => void;
+};
+
+function AirPurifierFormPanel({
+  form, setAirF, accent,
+  author, setAuthor, authorBook, setAuthorBook,
+}: AirPurifierFormPanelProps) {
+  return (
+    <section className="mb-3 rounded-2xl bg-white p-3 shadow-sm sm:p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <label className="text-xs font-medium text-slate-600">청정기 입력</label>
+        <span className="text-[10px] text-slate-400">입력 즉시 결과에 반영</span>
+      </div>
+
+      {/* 작성자 */}
+      <div className="mb-2">
+        <div className="mb-1 text-xs font-semibold text-slate-700">작성자</div>
+        <AuthorPicker
+          value={author}
+          onChange={setAuthor}
+          authorBook={authorBook}
+          setAuthorBook={setAuthorBook}
+          accent={accent}
+        />
+      </div>
+
+      {/* 필터리셋 / 필터교체 */}
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <div>
+          <div className="mb-1 text-xs font-semibold text-slate-700">필터리셋</div>
+          <NumSelect
+            value={form.filterReset}
+            onChange={(v) => setAirF("filterReset", v)}
+            options={YESNO_OPTIONS}
+            placeholder="-"
+            accent={accent}
+          />
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold text-slate-700">필터교체</div>
+          <NumSelect
+            value={form.filterChange}
+            onChange={(v) => setAirF("filterChange", v)}
+            options={YESNO_OPTIONS}
+            placeholder="-"
+            accent={accent}
+          />
+        </div>
+      </div>
+
+      {/* 특이사항 */}
+      <div className="mb-3">
+        <div className="mb-1 text-xs font-semibold text-slate-700">특이사항</div>
+        <textarea
+          value={form.notes}
+          onChange={(e) => setAirF("notes", e.target.value)}
+          rows={3}
+          className="w-full resize-y rounded-lg bg-slate-50 p-2 text-sm outline-none focus:bg-white"
+        />
+      </div>
+
+      {/* 시간 */}
+      <div className="space-y-2">
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700">도착 시간</span>
+            {form.arrivalHour && (
+              <span className="text-xs font-semibold" style={{ color: accent }}>
+                {form.arrivalHour}:{form.arrivalMinute || "00"}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <NumSelect
+              value={form.arrivalHour}
+              onChange={(v) => setAirF("arrivalHour", v)}
+              options={HOUR_OPTIONS}
+              placeholder="시"
+              accent={accent}
+              suffix="시"
+            />
+            <NumSelect
+              value={form.arrivalMinute}
+              onChange={(v) => setAirF("arrivalMinute", v)}
+              options={MINUTE_OPTIONS}
+              placeholder="분"
+              accent={accent}
+              suffix="분"
+            />
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700">소요 시간</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold" style={{ color: accent }}>
+                {form.duration ? `${form.duration}분` : "0분"}
+              </span>
+              {form.duration && (
+                <button
+                  type="button"
+                  onClick={() => setAirF("duration", "")}
+                  className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 active:scale-95"
+                >
+                  초기화
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-5 gap-1.5">
+            {DURATION_STEPS.map((step: number) => (
+              <button
+                key={step}
+                type="button"
+                onClick={() => {
+                  const current = parseInt(form.duration || "0", 10) || 0;
+                  setAirF("duration", String(current + step));
+                }}
+                className="rounded-lg bg-slate-100 py-2.5 text-sm font-semibold text-slate-700 transition active:scale-95"
+              >
+                +{step}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Main component
 // ────────────────────────────────────────────────────────────────────────────
@@ -2471,19 +2857,61 @@ export default function App() {
   const [toast, setToast] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [form, setForm] = useState<ProcessingForm>(EMPTY_FORM);
+  const [airForm, setAirForm] = useState<AirPurifierForm>(EMPTY_AIR_FORM);
   const [editedContents, setEditedContents] = useState<Record<number, string>>({});
+  const [editedTextOutput, setEditedTextOutput] = useState<string | null>(null);
+
+  const [author, setAuthor] = useState<string>(() => {
+    try { return localStorage.getItem("author") || ""; } catch { return ""; }
+  });
+  const [authorBook, setAuthorBook] = useState<AuthorBook>(() => {
+    try {
+      const raw = localStorage.getItem("authorBook");
+      if (!raw) return EMPTY_AUTHOR_BOOK;
+      const parsed = JSON.parse(raw);
+      return {
+        A: Array.isArray(parsed.A) ? parsed.A : [],
+        B: Array.isArray(parsed.B) ? parsed.B : [],
+        C: Array.isArray(parsed.C) ? parsed.C : [],
+        D: Array.isArray(parsed.D) ? parsed.D : [],
+      };
+    } catch {
+      return EMPTY_AUTHOR_BOOK;
+    }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem("author", author); } catch {
+      // ignore quota / private mode errors
+    }
+  }, [author]);
+  useEffect(() => {
+    try { localStorage.setItem("authorBook", JSON.stringify(authorBook)); } catch {
+      // ignore quota / private mode errors
+    }
+  }, [authorBook]);
 
   const config = MODE_CONFIG[mode];
   const isListMode = mode === "samsung-note" || mode === "blank-report";
   const showForm = mode === "blank-report";
+  const showAirForm = mode === "air-purifier";
 
   const displayedList = useMemo(() => {
     if (mode !== "blank-report") return listOutput;
     return listOutput.map((item: ResultItem) => ({
       ...item,
-      content: applyProcessingForm(item.content, form),
+      content: applyProcessingForm(item.content, form, author),
     }));
-  }, [mode, listOutput, form]);
+  }, [mode, listOutput, form, author]);
+
+  const displayedTextOutput = useMemo(() => {
+    if (mode === "air-purifier") {
+      return applyAirPurifierForm(textOutput, airForm, author);
+    }
+    return textOutput;
+  }, [mode, textOutput, airForm, author]);
+
+  const effectiveTextOutput = editedTextOutput ?? displayedTextOutput;
 
   const setF = <K extends keyof ProcessingForm>(key: K, value: ProcessingForm[K]) => {
     setForm((prev: ProcessingForm) => ({ ...prev, [key]: value }));
@@ -2493,6 +2921,9 @@ export default function App() {
       ...prev,
       [key]: prev[key] === value ? "" : value,
     }));
+  };
+  const setAirF = <K extends keyof AirPurifierForm>(key: K, value: AirPurifierForm[K]) => {
+    setAirForm((prev: AirPurifierForm) => ({ ...prev, [key]: value }));
   };
 
   const lineStats = useMemo(() => {
@@ -2510,6 +2941,7 @@ export default function App() {
     setListOutput([]);
     setCopiedIndex(null);
     setEditedContents({});
+    setEditedTextOutput(null);
   };
 
   const handleModeChange = (next: Mode) => {
@@ -2537,6 +2969,7 @@ export default function App() {
     }
     setCopiedIndex(null);
     setEditedContents({});
+    setEditedTextOutput(null);
   };
 
   const handlePaste = async () => {
@@ -2563,7 +2996,7 @@ export default function App() {
   const handleCopyAll = async () => {
     const target = isListMode
       ? displayedList.map((item: ResultItem, i: number) => editedContents[i] ?? item.content).join("\n\n")
-      : textOutput;
+      : effectiveTextOutput;
 
     if (!target) {
       showToast("복사할 내용이 없어요", "error");
@@ -2578,6 +3011,7 @@ export default function App() {
     setInputText("");
     resetOutputs();
     setForm(EMPTY_FORM);
+    setAirForm(EMPTY_AIR_FORM);
     showToast("초기화 완료");
   };
 
@@ -2668,6 +3102,23 @@ export default function App() {
             toggleF={toggleF}
             accent={config.accent}
             bgSoft={config.bgSoft}
+            author={author}
+            setAuthor={setAuthor}
+            authorBook={authorBook}
+            setAuthorBook={setAuthorBook}
+          />
+        )}
+
+        {/* Air purifier form — only for 청정기 */}
+        {showAirForm && (
+          <AirPurifierFormPanel
+            form={airForm}
+            setAirF={setAirF}
+            accent={config.accent}
+            author={author}
+            setAuthor={setAuthor}
+            authorBook={authorBook}
+            setAuthorBook={setAuthorBook}
           />
         )}
 
@@ -2764,8 +3215,8 @@ export default function App() {
                 }}
               >
                 <textarea
-                  value={textOutput}
-                  readOnly
+                  value={effectiveTextOutput}
+                  onChange={(e) => setEditedTextOutput(e.target.value)}
                   className="h-72 w-full resize-none bg-transparent font-mono text-xs leading-relaxed outline-none sm:h-96"
                 />
               </div>
