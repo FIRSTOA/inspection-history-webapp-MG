@@ -2020,6 +2020,11 @@ function parseSpareInput(line: string): {
   r.Y = grab(/Y\s*-?\s*(\d+)/i);
   r.waste = grab(/폐\s*-?\s*(\d+)/);
   r.drum = grab(/드럼\s*-?\s*(\d+)/);
+  // "1set" / "1세트" / "1셋" = one set of each color toner (K=C=M=Y).
+  const setMatch = body.match(/(\d+)\s*(?:set|세트|셋)/i);
+  if (setMatch && !r.K && !r.C && !r.M && !r.Y) {
+    r.K = r.C = r.M = r.Y = setMatch[1];
+  }
   return r;
 }
 
