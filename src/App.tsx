@@ -2208,6 +2208,33 @@ function parseItemDataFromText(text: string, count: number): PerItemForm[] {
   return forms;
 }
 
+// Extracts the lines belonging to the Nth inspection item (its numbered
+// title down to the next item/section), for the live preview.
+function extractItemBlock(text: string, index: number): string {
+  if (!text) return "";
+  const result: string[] = [];
+  let idx = -1;
+  for (const line of text.split("\n")) {
+    if (/^※/.test(line)) {
+      if (idx === index) break;
+      continue;
+    }
+    const isItemStart = /^\s*\d+\./.test(line);
+    if (isItemStart) {
+      idx++;
+      if (idx > index) break;
+    }
+    if (idx === index) {
+      if (isDividerLine(line)) {
+        if (result.length) break;
+        continue;
+      }
+      result.push(line);
+    }
+  }
+  return result.join("\n").trim();
+}
+
 function countInspectionItems(text: string): number {
   if (!text) return 0;
   return text.split("\n").filter((l: string) => /^\s*\d+\./.test(l)).length;
@@ -2542,6 +2569,8 @@ function ProcessingFormPanel({
   accent, bgSoft,
   author, setAuthor, showLevel, showHantinParking, showDrum,
 }: ProcessingFormPanelProps) {
+  const [partsExpanded, setPartsExpanded] = useState(false);
+  const [selfExpanded, setSelfExpanded] = useState(false);
   const numInputClass =
     "w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white";
   const textInputClass =
@@ -2802,8 +2831,16 @@ function ProcessingFormPanel({
 
       {/* 부품신청 */}
       <div className="mb-3 rounded-xl border border-slate-200 p-2">
-        <div className="mb-2 text-xs font-bold text-slate-700">※ 부품신청 ※</div>
-        <div className="space-y-1.5">
+        <button
+          type="button"
+          onClick={() => setPartsExpanded((v) => !v)}
+          className="flex w-full items-center justify-between text-xs font-bold text-slate-700"
+        >
+          <span>※ 부품신청 ※</span>
+          <span className="text-[10px] text-slate-400">{partsExpanded ? "접기 ▲" : "펼치기 ▼"}</span>
+        </button>
+        {partsExpanded && (
+        <div className="mt-2 space-y-1.5">
           <div>
             <div className="text-[11px] text-slate-500">보증기간 내 여부</div>
             <input value={shared.warranty} onChange={(e) => setSharedF("warranty", e.target.value)} className={textInputClass} />
@@ -2837,12 +2874,21 @@ function ProcessingFormPanel({
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* 자가신청 */}
       <div className="mb-3 rounded-xl border border-slate-200 p-2">
-        <div className="mb-2 text-xs font-bold text-slate-700">※ 자가신청 ※</div>
-        <div className="space-y-1.5">
+        <button
+          type="button"
+          onClick={() => setSelfExpanded((v) => !v)}
+          className="flex w-full items-center justify-between text-xs font-bold text-slate-700"
+        >
+          <span>※ 자가신청 ※</span>
+          <span className="text-[10px] text-slate-400">{selfExpanded ? "접기 ▲" : "펼치기 ▼"}</span>
+        </button>
+        {selfExpanded && (
+        <div className="mt-2 space-y-1.5">
           <div>
             <div className="text-[11px] text-slate-500">물품</div>
             <input value={shared.selfItem} onChange={(e) => setSharedF("selfItem", e.target.value)} className={textInputClass} />
@@ -2863,6 +2909,7 @@ function ProcessingFormPanel({
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* 시간 */}
@@ -3083,6 +3130,7 @@ export default function App() {
   const [itemForms, setItemForms] = useState<PerItemForm[]>([EMPTY_ITEM_FORM]);
   const [sharedForm, setSharedForm] = useState<SharedForm>(EMPTY_SHARED_FORM);
   const [selectedItem, setSelectedItem] = useState<number>(0);
+  const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   const [airForm, setAirForm] = useState<AirPurifierForm>(EMPTY_AIR_FORM);
   const [editedContents, setEditedContents] = useState<Record<number, string>>({});
   const [editedTextOutput, setEditedTextOutput] = useState<string | null>(null);
@@ -3128,6 +3176,20 @@ export default function App() {
   const effectiveTextOutput = editedTextOutput ?? displayedTextOutput;
 
   const currentItemForm = itemForms[selectedItem] ?? EMPTY_ITEM_FORM;
+
+  // Live preview of just the device currently being edited (or the whole
+  // single-device result), shown in a pinned panel above the action bar.
+  const previewText = useMemo(() => {
+    if (mode === "inspection") {
+      return extractItemBlock(effectiveTextOutput, selectedItem) || effectiveTextOutput;
+    }
+    if (mode === "blank-report") {
+      const item = displayedList[selectedItem];
+      return (editedContents[selectedItem] ?? item?.content) || "";
+    }
+    if (mode === "air-purifier") return effectiveTextOutput;
+    return "";
+  }, [mode, effectiveTextOutput, selectedItem, displayedList, editedContents]);
 
   const itemLabels = useMemo(() => {
     if (mode === "inspection") return extractInspectionItemLabels(textOutput);
@@ -3292,7 +3354,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto flex max-w-3xl flex-col px-3 pb-32 pt-4 sm:px-6 sm:pt-6">
+      <div className={`mx-auto flex max-w-3xl flex-col px-3 pt-4 sm:px-6 sm:pt-6 ${showForm && previewText ? "pb-52" : "pb-32"}`}>
         {/* Header */}
         <header className="mb-4 flex items-center justify-between">
           <div>
@@ -3524,8 +3586,30 @@ export default function App() {
         )}
       </div>
 
-      {/* Sticky bottom action bar — thumb zone */}
+      {/* Sticky bottom: live preview + action bar */}
       <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 backdrop-blur">
+        {showForm && previewText && (
+          <div className="mx-auto max-w-3xl px-3 sm:px-6">
+            <button
+              type="button"
+              onClick={() => setPreviewOpen((v) => !v)}
+              className="flex w-full items-center justify-between py-2 text-xs font-semibold"
+              style={{ color: config.accent }}
+            >
+              <span>
+                📄 미리보기
+                {itemForms.length > 1 ? ` · ${itemLabels[selectedItem] ?? `${selectedItem + 1}.`}` : ""}
+              </span>
+              <span className="text-[10px] text-slate-400">{previewOpen ? "접기 ▼" : "펼치기 ▲"}</span>
+            </button>
+            <pre
+              className="overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-2 font-mono text-[11px] leading-snug text-slate-800 transition-all"
+              style={{ maxHeight: previewOpen ? "45vh" : "4.5rem" }}
+            >
+              {previewText}
+            </pre>
+          </div>
+        )}
         <div className="mx-auto flex max-w-3xl items-center gap-2 px-3 py-3 sm:px-6">
           <button
             onClick={handleReset}
