@@ -2040,6 +2040,21 @@ function renderSpareLine(f: PerItemForm): string {
   return base + drum + note;
 }
 
+// A numbered line ("1.", "2. 7층") only starts a new item when it directly
+// follows a divider — this avoids treating numbered lines inside multi-line
+// 처리내용/특이사항 (e.g. "2.토너교체") as a new device.
+function itemStartFlags(lines: string[]): boolean[] {
+  const flags: boolean[] = new Array(lines.length).fill(false);
+  let prevDivider = false;
+  lines.forEach((line: string, i: number) => {
+    if (isDividerLine(line)) { prevDivider = true; return; }
+    if (line.trim() === "") return;
+    if (prevDivider && /^\s*\d+\./.test(line) && !/※/.test(line)) flags[i] = true;
+    prevDivider = false;
+  });
+  return flags;
+}
+
 function applyProcessingFormV2(
   text: string,
   itemForms: PerItemForm[],
@@ -2050,18 +2065,21 @@ function applyProcessingFormV2(
   let section: "" | "parts" | "self" = "";
   let skipNoteCont = false;
   const out: string[] = [];
+  const lines = text.split("\n");
+  const starts = itemStartFlags(lines);
 
-  for (const line of text.split("\n")) {
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
     // Skip continuation lines of a 특이사항 we've already re-rendered from the form.
     if (skipNoteCont) {
-      if (isDividerLine(line) || /^※/.test(line) || /^\s*\d+\./.test(line)) {
+      if (isDividerLine(line) || /^※/.test(line) || starts[li]) {
         skipNoteCont = false;
       } else {
         continue;
       }
     }
 
-    if (/^\s*\d+\./.test(line) && !/※/.test(line)) {
+    if (starts[li]) {
       itemIdx++;
       section = "";
       out.push(line);
@@ -2180,9 +2198,12 @@ function parseItemDataFromText(text: string, count: number): PerItemForm[] {
   const forms: PerItemForm[] = Array.from({ length: count }, () => ({ ...EMPTY_ITEM_FORM }));
   let idx = -1;
   let collectingNote = false;
+  const lines = text.split("\n");
+  const starts = itemStartFlags(lines);
 
-  for (const line of text.split("\n")) {
-    if (/^\s*\d+\./.test(line) && !/※/.test(line)) { idx++; collectingNote = false; continue; }
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    if (starts[li]) { idx++; collectingNote = false; continue; }
     if (isDividerLine(line) || /^※/.test(line)) { collectingNote = false; continue; }
     if (idx < 0 || idx >= count) continue;
 
@@ -2212,15 +2233,17 @@ function parseItemDataFromText(text: string, count: number): PerItemForm[] {
 // title down to the next item/section), for the live preview.
 function extractItemBlock(text: string, index: number): string {
   if (!text) return "";
+  const lines = text.split("\n");
+  const starts = itemStartFlags(lines);
   const result: string[] = [];
   let idx = -1;
-  for (const line of text.split("\n")) {
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
     if (/^※/.test(line)) {
       if (idx === index) break;
       continue;
     }
-    const isItemStart = /^\s*\d+\./.test(line);
-    if (isItemStart) {
+    if (starts[li]) {
       idx++;
       if (idx > index) break;
     }
@@ -2237,11 +2260,13 @@ function extractItemBlock(text: string, index: number): string {
 
 function countInspectionItems(text: string): number {
   if (!text) return 0;
-  return text.split("\n").filter((l: string) => /^\s*\d+\./.test(l)).length;
+  return itemStartFlags(text.split("\n")).filter(Boolean).length;
 }
 
 function extractInspectionItemLabels(text: string): string[] {
   if (!text) return [];
+  const lines = text.split("\n");
+  const starts = itemStartFlags(lines);
   const labels: string[] = [];
   let idx = -1;
   let location = "";
@@ -2255,12 +2280,13 @@ function extractInspectionItemLabels(text: string): string[] {
     labels.push(`${idx + 1}. ${parts.length ? parts.join("/") : "(미상)"}`);
   };
 
-  for (const line of text.split("\n")) {
-    const titleMatch = line.match(/^\s*\d+\.\s*(.*)$/);
-    if (titleMatch) {
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    if (starts[li]) {
       flush();
       idx++;
-      location = titleMatch[1].trim();
+      const titleMatch = line.match(/^\s*\d+\.\s*(.*)$/);
+      location = titleMatch ? titleMatch[1].trim() : "";
       model = serial = asset = "";
       continue;
     }
@@ -3130,7 +3156,7 @@ export default function App() {
   const [itemForms, setItemForms] = useState<PerItemForm[]>([EMPTY_ITEM_FORM]);
   const [sharedForm, setSharedForm] = useState<SharedForm>(EMPTY_SHARED_FORM);
   const [selectedItem, setSelectedItem] = useState<number>(0);
-  const [previewOpen, setPreviewOpen] = useState<boolean>(false);
+  const [previewOpen, setPreviewOpen] = useState<boolean>(true);
   const [airForm, setAirForm] = useState<AirPurifierForm>(EMPTY_AIR_FORM);
   const [editedContents, setEditedContents] = useState<Record<number, string>>({});
   const [editedTextOutput, setEditedTextOutput] = useState<string | null>(null);
