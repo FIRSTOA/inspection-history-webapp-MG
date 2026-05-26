@@ -1879,6 +1879,8 @@ type PerItemForm = {
   spareY: string;
   spareWaste: string;
   spareDrum: string;
+  spareNote: string;
+  spareShared: string;
   hantin: string;
   parkingChip: string;
   parkingCustom: string;
@@ -1890,7 +1892,7 @@ const EMPTY_ITEM_FORM: PerItemForm = {
   mailBlack: "", mailColor: "", mailLargeColor: "", mailTotal: "",
   tonerK: "", tonerC: "", tonerM: "", tonerY: "",
   waste: "",
-  spareK: "", spareC: "", spareM: "", spareY: "", spareWaste: "", spareDrum: "",
+  spareK: "", spareC: "", spareM: "", spareY: "", spareWaste: "", spareDrum: "", spareNote: "", spareShared: "",
   hantin: "",
   parkingChip: "", parkingCustom: "",
   notes: "",
@@ -1996,43 +1998,41 @@ function mergeWasteLine(line: string, f: PerItemForm): string {
   return `폐통: ${f.waste.trim()}%`;
 }
 
-// Replaces only the numeric value of a single channel marker in-place,
-// leaving prefixes (토너/드럼), separators, location notes, and unknown
-// tokens untouched. Used for both 점검 and 미양식 since 여분 lines can
-// be free-form. `aliases` lets one form field target multiple markers
-// (e.g. K also matches a bare 토너 on a mono printer that has no K).
-function setChannelValue(line: string, aliases: string[], value: string): string {
-  for (const letter of aliases) {
-    const flags = /[A-Za-z]/.test(letter) ? "i" : "";
-    const withDigits = new RegExp(`(${letter}\\s*-?\\s*)\\d+`, flags);
-    if (withDigits.test(line)) {
-      return line.replace(withDigits, `$1${value}`);
-    }
-  }
-  for (const letter of aliases) {
-    const flags = /[A-Za-z]/.test(letter) ? "i" : "";
-    const placeholder = new RegExp(`(${letter})(\\s*-)`, flags);
-    if (placeholder.test(line)) {
-      return line.replace(placeholder, `$1$2${value}`);
-    }
-  }
-  return line;
+// Parses a free-form 여분 line into structured channel counts plus any
+// trailing location note. K also accepts a bare 토너 (mono printers).
+// '공용' (shared with an adjacent device) is detected as a whole-line flag.
+function parseSpareInput(line: string): {
+  K: string; C: string; M: string; Y: string; waste: string; drum: string; note: string; shared: string;
+} {
+  const r = { K: "", C: "", M: "", Y: "", waste: "", drum: "", note: "", shared: "" };
+  if (/공용/.test(line)) r.shared = "공용";
+  // Trailing note: from the first "(" to end of line.
+  const noteMatch = line.match(/(\(.*)$/);
+  if (noteMatch) r.note = noteMatch[1].trim();
+  const body = noteMatch ? line.slice(0, noteMatch.index) : line;
+  const grab = (re: RegExp): string => {
+    const m = body.match(re);
+    return m ? m[1] : "";
+  };
+  r.K = grab(/K\s*-?\s*(\d+)/i) || grab(/토너\s*-?\s*(\d+)/);
+  r.C = grab(/C\s*-?\s*(\d+)/i);
+  r.M = grab(/M\s*-?\s*(\d+)/i);
+  r.Y = grab(/Y\s*-?\s*(\d+)/i);
+  r.waste = grab(/폐\s*-?\s*(\d+)/);
+  r.drum = grab(/드럼\s*-?\s*(\d+)/);
+  return r;
 }
 
-function mergeSpareInPlace(line: string, f: PerItemForm): string {
-  let result = line;
-  if (f.spareK.trim()) result = setChannelValue(result, ["K", "토너"], f.spareK.trim());
-  if (f.spareC.trim()) result = setChannelValue(result, ["C"], f.spareC.trim());
-  if (f.spareM.trim()) result = setChannelValue(result, ["M"], f.spareM.trim());
-  if (f.spareY.trim()) result = setChannelValue(result, ["Y"], f.spareY.trim());
-  if (f.spareWaste.trim()) result = setChannelValue(result, ["폐"], f.spareWaste.trim());
-  if (f.spareDrum.trim()) {
-    const drumVal = f.spareDrum.trim();
-    const replaced = setChannelValue(result, ["드럼"], drumVal);
-    // No existing 드럼 marker (e.g. 미양식 placeholder) → append one.
-    result = replaced === result ? `${result} 드럼-${drumVal}` : replaced;
+// Renders the canonical "여분: K- C- M- Y- 폐-" line from the form,
+// appending 드럼 and any preserved note. '공용' overrides the channels.
+function renderSpareLine(f: PerItemForm): string {
+  if (f.spareShared.trim()) {
+    return `여분: 공용${f.spareNote.trim() ? ` ${f.spareNote.trim()}` : ""}`;
   }
-  return result;
+  const base = `여분: K-${f.spareK.trim()} C-${f.spareC.trim()} M-${f.spareM.trim()} Y-${f.spareY.trim()} 폐-${f.spareWaste.trim()}`;
+  const drum = f.spareDrum.trim() ? ` 드럼-${f.spareDrum.trim()}` : "";
+  const note = f.spareNote.trim() ? ` ${f.spareNote.trim()}` : "";
+  return base + drum + note;
 }
 
 function applyProcessingFormV2(
@@ -2043,48 +2043,66 @@ function applyProcessingFormV2(
 ): string {
   let itemIdx = -1;
   let section: "" | "parts" | "self" = "";
+  let skipNoteCont = false;
+  const out: string[] = [];
 
-  return text.split("\n").map((line: string) => {
+  for (const line of text.split("\n")) {
+    // Skip continuation lines of a 특이사항 we've already re-rendered from the form.
+    if (skipNoteCont) {
+      if (isDividerLine(line) || /^※/.test(line) || /^\s*\d+\./.test(line)) {
+        skipNoteCont = false;
+      } else {
+        continue;
+      }
+    }
+
     if (/^\s*\d+\./.test(line) && !/※/.test(line)) {
       itemIdx++;
       section = "";
-      return line;
+      out.push(line);
+      continue;
     }
-    if (/^※부품신청※/.test(line)) { section = "parts"; return line; }
-    if (/^※자가신청※/.test(line)) { section = "self"; return line; }
+    if (/^※부품신청※/.test(line)) { section = "parts"; out.push(line); continue; }
+    if (/^※자가신청※/.test(line)) { section = "self"; out.push(line); continue; }
 
     // Header (shared)
     if (/^작성자\s*:/.test(line)) {
-      return author.trim() ? line.replace(/^(작성자\s*:\s*).*/, `$1${author.trim()}`) : line;
+      out.push(author.trim() ? line.replace(/^(작성자\s*:\s*).*/, `$1${author.trim()}`) : line);
+      continue;
     }
     if (/^레벨\s*:/.test(line)) {
-      return shared.level.trim() ? line.replace(/^(레벨\s*:\s*).*/, `$1${shared.level.trim()}`) : line;
+      out.push(shared.level.trim() ? line.replace(/^(레벨\s*:\s*).*/, `$1${shared.level.trim()}`) : line);
+      continue;
     }
 
     // Per-item fields
     if (itemIdx >= 0 && itemIdx < itemForms.length) {
       const f = itemForms[itemIdx];
       if (/^처리내용\s*:/.test(line)) {
-        return f.processContent.trim() ? `처리내용: ${f.processContent.trim()}` : line;
+        out.push(f.processContent.trim() ? `처리내용: ${f.processContent.trim()}` : line);
+        continue;
       }
-      if (/^매수\s*:/.test(line)) return mergeMailLine(line, f);
-      if (/^토너잔량\s*:/.test(line)) return mergeTonerLine(line, f);
-      if (/^폐통\s*:/.test(line)) return mergeWasteLine(line, f);
-      if (/^여분\s*:/.test(line)) return mergeSpareInPlace(line, f);
+      if (/^매수\s*:/.test(line)) { out.push(mergeMailLine(line, f)); continue; }
+      if (/^토너잔량\s*:/.test(line)) { out.push(mergeTonerLine(line, f)); continue; }
+      if (/^폐통\s*:/.test(line)) { out.push(mergeWasteLine(line, f)); continue; }
+      if (/^여분\s*:/.test(line)) { out.push(renderSpareLine(f)); continue; }
       if (/^한틴이카유무\s*:/.test(line)) {
         const existing = parseValueAfterColon(line, "한틴이카유무");
         const v = f.hantin.trim() || existing;
-        return suffixIfValue("한틴이카유무:", v);
+        out.push(suffixIfValue("한틴이카유무:", v));
+        continue;
       }
       if (/^주차비지원유무\s*:/.test(line)) {
         const existing = parseValueAfterColon(line, "주차비지원유무");
         const parkingValue = f.parkingCustom.trim() || f.parkingChip || existing;
-        return suffixIfValue("주차비지원유무:", parkingValue);
+        out.push(suffixIfValue("주차비지원유무:", parkingValue));
+        continue;
       }
       if (/^특이사항\s*:/.test(line)) {
-        const existing = parseValueAfterColon(line, "특이사항");
-        const v = f.notes.trim() || existing;
-        return suffixIfValue("특이사항:", v);
+        const notes = f.notes.trim();
+        out.push(notes ? `특이사항: ${notes}` : "특이사항:");
+        skipNoteCont = true;
+        continue;
       }
     }
 
@@ -2092,52 +2110,97 @@ function applyProcessingFormV2(
     if (/^보증기간 내 여부\s*:/.test(line)) {
       const existing = parseValueAfterColon(line, "보증기간 내 여부");
       const v = shared.warranty.trim() || existing;
-      return v ? `보증기간 내 여부 : ${v}` : "보증기간 내 여부 :";
+      out.push(v ? `보증기간 내 여부 : ${v}` : "보증기간 내 여부 :");
+      continue;
     }
     if (/^교체 전 카운터 누적 사용매수\s*:/.test(line)) {
       const existing = parseValueAfterColon(line, "교체 전 카운터 누적 사용매수");
       const v = shared.cumCount.trim() || existing;
-      return v ? `교체 전 카운터 누적 사용매수 : ${v}` : "교체 전 카운터 누적 사용매수 :";
+      out.push(v ? `교체 전 카운터 누적 사용매수 : ${v}` : "교체 전 카운터 누적 사용매수 :");
+      continue;
     }
     if (/^사용 부품 예상 사용매수\s*:/.test(line)) {
       const existing = parseValueAfterColon(line, "사용 부품 예상 사용매수");
       const v = shared.expectedCount.trim() || existing;
-      return v ? `사용 부품 예상 사용매수 : ${v}` : "사용 부품 예상 사용매수 :";
+      out.push(v ? `사용 부품 예상 사용매수 : ${v}` : "사용 부품 예상 사용매수 :");
+      continue;
     }
     if (/^물품명\s*:/.test(line)) {
       const existing = parseValueAfterColon(line, "물품명");
       const v = shared.partName.trim() || existing;
-      return suffixIfValue("물품명:", v);
+      out.push(suffixIfValue("물품명:", v));
+      continue;
     }
     if (/^물품\s*:/.test(line) && section === "self") {
       const existing = parseValueAfterColon(line, "물품");
       const v = shared.selfItem.trim() || existing;
-      return suffixIfValue("물품:", v);
+      out.push(suffixIfValue("물품:", v));
+      continue;
     }
     if (/^수량\s*:/.test(line)) {
       const existing = parseValueAfterColon(line, "수량");
       const v = (section === "self" ? shared.selfQty.trim() : shared.partQty.trim()) || existing;
-      return suffixIfValue("수량:", v);
+      out.push(suffixIfValue("수량:", v));
+      continue;
     }
     if (/^출고여부\s*:/.test(line)) {
       const existing = parseValueAfterColon(line, "출고여부");
       const v = (section === "self" ? shared.selfShipped.trim() : shared.partShipped.trim()) || existing;
-      return suffixIfValue("출고여부:", v);
+      out.push(suffixIfValue("출고여부:", v));
+      continue;
     }
     if (/^도착 시간\s*:/.test(line)) {
       const existing = parseValueAfterColon(line, "도착 시간");
       const arrival = shared.arrivalHour
         ? `${shared.arrivalHour}:${shared.arrivalMinute || "00"}`
         : existing;
-      return suffixIfValue("도착 시간:", arrival);
+      out.push(suffixIfValue("도착 시간:", arrival));
+      continue;
     }
     if (/^소요 시간\s*:/.test(line)) {
       const existing = parseValueAfterColon(line, "소요 시간");
       const v = shared.duration.trim() ? `${shared.duration.trim()}분` : existing;
-      return suffixIfValue("소요 시간:", v);
+      out.push(suffixIfValue("소요 시간:", v));
+      continue;
     }
-    return line;
-  }).join("\n");
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+// Pre-fills per-item forms from a transformed result: parses each item's
+// 여분 (into channel counts/note/공용) and 특이사항 so the form boxes show
+// the existing values for the user to confirm or edit.
+function parseItemDataFromText(text: string, count: number): PerItemForm[] {
+  const forms: PerItemForm[] = Array.from({ length: count }, () => ({ ...EMPTY_ITEM_FORM }));
+  let idx = -1;
+  let collectingNote = false;
+
+  for (const line of text.split("\n")) {
+    if (/^\s*\d+\./.test(line) && !/※/.test(line)) { idx++; collectingNote = false; continue; }
+    if (isDividerLine(line) || /^※/.test(line)) { collectingNote = false; continue; }
+    if (idx < 0 || idx >= count) continue;
+
+    if (/^여분\s*:/.test(line)) {
+      const p = parseSpareInput(line);
+      const f = forms[idx];
+      f.spareK = p.K; f.spareC = p.C; f.spareM = p.M; f.spareY = p.Y;
+      f.spareWaste = p.waste; f.spareDrum = p.drum; f.spareNote = p.note; f.spareShared = p.shared;
+      collectingNote = false;
+      continue;
+    }
+    if (/^특이사항\s*:/.test(line)) {
+      forms[idx].notes = parseValueAfterColon(line, "특이사항");
+      collectingNote = true;
+      continue;
+    }
+    if (collectingNote && !/^(모델명|시리얼넘버|자산기번|내용|처리내용|매수|토너잔량|폐통|여분|한틴이카유무|주차비지원유무)\s*:/.test(line)) {
+      forms[idx].notes = forms[idx].notes ? `${forms[idx].notes}\n${line}` : line;
+      continue;
+    }
+    collectingNote = false;
+  }
+  return forms;
 }
 
 function countInspectionItems(text: string): number {
@@ -2149,20 +2212,23 @@ function extractInspectionItemLabels(text: string): string[] {
   if (!text) return [];
   const labels: string[] = [];
   let idx = -1;
+  let location = "";
   let model = "";
   let serial = "";
   let asset = "";
 
   const flush = () => {
     if (idx < 0) return;
-    const parts = [model, serial, asset].map((p: string) => p.trim()).filter((p: string) => p);
+    const parts = [location, model, serial, asset].map((p: string) => p.trim()).filter((p: string) => p);
     labels.push(`${idx + 1}. ${parts.length ? parts.join("/") : "(미상)"}`);
   };
 
   for (const line of text.split("\n")) {
-    if (/^\s*\d+\./.test(line)) {
+    const titleMatch = line.match(/^\s*\d+\.\s*(.*)$/);
+    if (titleMatch) {
       flush();
       idx++;
+      location = titleMatch[1].trim();
       model = serial = asset = "";
       continue;
     }
@@ -2609,17 +2675,22 @@ function ProcessingFormPanel({
         <div className="mb-1.5">
           <FieldRow label="전">
             <NumSelect
-              value=""
+              value={itemForm.spareShared ? "공용" : ""}
               onChange={(v) => {
                 if (!v) return;
+                if (v === "공용") {
+                  setItemF("spareShared", "공용");
+                  return;
+                }
+                setItemF("spareShared", "");
                 setItemF("spareK", v);
                 setItemF("spareC", v);
                 setItemF("spareM", v);
                 setItemF("spareY", v);
                 setItemF("spareWaste", v);
               }}
-              options={SPARE_OPTIONS}
-              placeholder="일괄 설정"
+              options={[...SPARE_OPTIONS, "공용"]}
+              placeholder="일괄/공용"
               accent={accent}
             />
           </FieldRow>
@@ -3104,12 +3175,13 @@ export default function App() {
   };
 
   const runTransform = (text: string, m: Mode) => {
-    let nextItemCount = 1;
+    let nextItemForms: PerItemForm[] = [{ ...EMPTY_ITEM_FORM }];
     if (m === "inspection") {
       const out = transformInspectionText(text);
       setTextOutput(out);
       setListOutput([]);
-      nextItemCount = Math.max(1, countInspectionItems(out));
+      const count = Math.max(1, countInspectionItems(out));
+      nextItemForms = parseItemDataFromText(out, count);
     } else if (m === "air-purifier") {
       setTextOutput(transformAirPurifierText(text));
       setListOutput([]);
@@ -3120,13 +3192,12 @@ export default function App() {
       const items = transformBlankReports(text);
       setListOutput(items);
       setTextOutput("");
-      nextItemCount = Math.max(1, items.length);
+      // Each 미양식 card is a self-contained single-item report.
+      nextItemForms = items.map((item: ResultItem) => parseItemDataFromText(item.content, 1)[0]);
+      if (nextItemForms.length === 0) nextItemForms = [{ ...EMPTY_ITEM_FORM }];
     }
-    setItemForms((prev: PerItemForm[]) => {
-      if (prev.length === nextItemCount) return prev;
-      return Array.from({ length: nextItemCount }, (_, i: number) => prev[i] ?? { ...EMPTY_ITEM_FORM });
-    });
-    setSelectedItem((prev: number) => Math.min(prev, Math.max(0, nextItemCount - 1)));
+    setItemForms(nextItemForms);
+    setSelectedItem(0);
     setCopiedIndex(null);
     setEditedContents({});
     setEditedTextOutput(null);
