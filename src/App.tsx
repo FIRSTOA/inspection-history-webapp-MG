@@ -3113,7 +3113,8 @@ export default function App() {
   // transient (not persisted) so a stale override never blocks the form.
   const [editedBlocks, setEditedBlocks] = useState<Record<number, string>>({});
   const [helpOpen, setHelpOpen] = useState<boolean>(false);
-  const [inputExpanded, setInputExpanded] = useState<boolean>(true);
+  const [inputModalOpen, setInputModalOpen] = useState<boolean>(false);
+  const [draftInput, setDraftInput] = useState<string>("");
 
 
   // On a restored session, skip the first auto-transform so it doesn't
@@ -3306,15 +3307,22 @@ export default function App() {
     return () => window.clearTimeout(handle);
   }, [mode, textOutput, listOutput, itemForms, sharedForm, selectedItem, airForm]);
 
-  const handlePaste = async () => {
+  const openInputModal = () => {
+    setDraftInput(inputText);
+    setInputModalOpen(true);
+  };
+  const handlePasteToDraft = async () => {
     const text = await pasteFromClipboard();
     if (text === null) {
       showToast("클립보드 권한이 필요해요", "error");
       return;
     }
-    setInputText(text);
-    setInputExpanded(false); // 붙여넣으면 자동으로 접힘
-    showToast("붙여넣기 완료");
+    setDraftInput(text);
+  };
+  const confirmInputModal = () => {
+    setInputText(draftInput);
+    if (!draftInput.trim()) resetOutputs();
+    setInputModalOpen(false);
   };
 
   const handleCopyAll = async () => {
@@ -3403,50 +3411,20 @@ export default function App() {
           })}
         </div>
 
-        {/* Input — 붙여넣으면 자동으로 접혀 스크롤을 방해하지 않음 */}
-        <section className="mb-3 rounded-2xl bg-white p-3 shadow-sm sm:p-4">
-          {inputExpanded || !inputText.trim() ? (
-            <>
-              <div className="mb-2 flex items-center justify-between">
-                <label className="text-xs font-medium text-slate-600">원본 입력</label>
-                <button
-                  onClick={handlePaste}
-                  className="rounded-lg px-2 py-1 text-xs font-medium transition active:scale-95"
-                  style={{ color: config.accent, background: config.bgSoft }}
-                >
-                  📋 붙여넣기
-                </button>
-              </div>
-              <textarea
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onPaste={() => window.setTimeout(() => setInputExpanded(false), 0)}
-                placeholder={config.placeholder}
-                className="h-44 w-full resize-none rounded-xl bg-slate-50 p-3 font-mono text-sm outline-none transition focus:bg-white sm:h-56"
-                style={{ borderColor: config.accent }}
-              />
-              {inputText.trim() && (
-                <button
-                  type="button"
-                  onClick={() => setInputExpanded(false)}
-                  className="mt-1 text-xs text-slate-400"
-                >
-                  접기 ▲
-                </button>
-              )}
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setInputExpanded(true)}
-              className="flex w-full items-center justify-between text-left"
-            >
-              <span className="text-sm font-medium" style={{ color: config.accent }}>
-                📋 원본 ({lineStats})
-              </span>
-              <span className="text-xs text-slate-400">탭하면 펼치기 ▼</span>
-            </button>
-          )}
+        {/* Input — opens a popup so the page has no big scroll-trapping box */}
+        <section className="mb-3">
+          <button
+            type="button"
+            onClick={openInputModal}
+            className="flex w-full items-center justify-between rounded-2xl bg-white p-4 text-left shadow-sm"
+          >
+            <span className="text-sm font-medium" style={{ color: config.accent }}>
+              📋 원본 붙여넣기 / 입력
+            </span>
+            <span className="text-xs text-slate-400">
+              {inputText.trim() ? `${lineStats} 입력됨` : "탭하세요"}
+            </span>
+          </button>
         </section>
 
         {/* Processing form — 미양식 + 점검 */}
@@ -3568,6 +3546,55 @@ export default function App() {
         </div>
       </div>
 
+      {/* 원본 입력 팝업 */}
+      {inputModalOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end bg-black/50 sm:items-center sm:justify-center"
+          onClick={() => setInputModalOpen(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white sm:max-w-lg sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <span className="text-sm font-bold text-slate-800">원본 입력</span>
+              <button
+                type="button"
+                onClick={handlePasteToDraft}
+                className="rounded-lg px-2 py-1 text-xs font-medium"
+                style={{ color: config.accent, background: config.bgSoft }}
+              >
+                📋 붙여넣기
+              </button>
+            </div>
+            <textarea
+              value={draftInput}
+              onChange={(e) => setDraftInput(e.target.value)}
+              placeholder={config.placeholder}
+              autoFocus
+              className="m-3 h-[45vh] resize-none rounded-xl bg-slate-50 p-3 font-mono text-sm outline-none focus:bg-white"
+            />
+            <div className="flex gap-2 border-t border-slate-100 p-3">
+              <button
+                type="button"
+                onClick={() => setInputModalOpen(false)}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmInputModal}
+                className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white"
+                style={{ background: config.accent }}
+              >
+                확인 (변환)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 사용 설명서 */}
       {helpOpen && (
         <div
@@ -3599,7 +3626,7 @@ export default function App() {
                 <div className="mb-1 font-bold text-slate-900">기본 순서 (이것만 기억!)</div>
                 <ol className="ml-4 list-decimal space-y-1">
                   <li>맨 위에서 <b>탭</b> 고르기</li>
-                  <li><b>원본 입력</b> 칸에 붙여넣기 → 자동으로 결과가 만들어지고 칸이 접혀요</li>
+                  <li><b>원본 붙여넣기</b> 버튼 → 팝업에 붙여넣고 <b>확인</b> → 결과가 만들어져요</li>
                   <li><b>작성자</b> 고르고, 빈 칸 채우기</li>
                   <li>맨 아래 <b>결과</b> 확인 (필요하면 직접 고치기)</li>
                   <li>맨 아래 <b>📋 복사</b> → 메신저에 붙여넣기</li>
