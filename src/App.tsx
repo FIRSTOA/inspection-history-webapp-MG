@@ -2207,35 +2207,6 @@ function parseItemDataFromText(text: string, count: number): PerItemForm[] {
   return forms;
 }
 
-// Extracts the lines belonging to the Nth inspection item (its numbered
-// title down to the next item/section), for the live preview.
-function extractItemBlock(text: string, index: number): string {
-  if (!text) return "";
-  const lines = text.split("\n");
-  const starts = itemStartFlags(lines);
-  const result: string[] = [];
-  let idx = -1;
-  for (let li = 0; li < lines.length; li++) {
-    const line = lines[li];
-    if (/^※/.test(line)) {
-      if (idx === index) break;
-      continue;
-    }
-    if (starts[li]) {
-      idx++;
-      if (idx > index) break;
-    }
-    if (idx === index) {
-      if (isDividerLine(line)) {
-        if (result.length) break;
-        continue;
-      }
-      result.push(line);
-    }
-  }
-  return result.join("\n").trim();
-}
-
 function countInspectionItems(text: string): number {
   if (!text) return 0;
   return itemStartFlags(text.split("\n")).filter(Boolean).length;
@@ -2695,8 +2666,9 @@ function ProcessingFormPanel({
                       key={step}
                       type="button"
                       onClick={() => {
+                        const cap = ch === "K" ? 200 : 100;
                         const cur = parseInt(val || "0", 10) || 0;
-                        setItemF(key, String(Math.min(100, cur + step)));
+                        setItemF(key, String(Math.min(cap, cur + step)));
                       }}
                       className="rounded-lg bg-white py-2 text-xs font-semibold text-slate-700 transition active:scale-95"
                     >
@@ -3109,13 +3081,18 @@ export default function App() {
   const [listOutput, setListOutput] = useState<ResultItem[]>((ss.listOutput as ResultItem[]) ?? []);
   const [toast, setToast] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [itemForms, setItemForms] = useState<PerItemForm[]>((ss.itemForms as PerItemForm[]) ?? [EMPTY_ITEM_FORM]);
-  const [sharedForm, setSharedForm] = useState<SharedForm>((ss.sharedForm as SharedForm) ?? EMPTY_SHARED_FORM);
+  const [itemForms, setItemForms] = useState<PerItemForm[]>(
+    Array.isArray(ss.itemForms) && ss.itemForms.length
+      ? (ss.itemForms as PerItemForm[]).map((f) => ({ ...EMPTY_ITEM_FORM, ...f }))
+      : [EMPTY_ITEM_FORM],
+  );
+  const [sharedForm, setSharedForm] = useState<SharedForm>({ ...EMPTY_SHARED_FORM, ...(ss.sharedForm as Partial<SharedForm> ?? {}) });
   const [selectedItem, setSelectedItem] = useState<number>((ss.selectedItem as number) ?? 0);
-  const [previewOpen, setPreviewOpen] = useState<boolean>(true);
-  const [airForm, setAirForm] = useState<AirPurifierForm>((ss.airForm as AirPurifierForm) ?? EMPTY_AIR_FORM);
-  const [editedContents, setEditedContents] = useState<Record<number, string>>((ss.editedContents as Record<number, string>) ?? {});
-  const [editedTextOutput, setEditedTextOutput] = useState<string | null>((ss.editedTextOutput as string | null) ?? null);
+  const [airForm, setAirForm] = useState<AirPurifierForm>({ ...EMPTY_AIR_FORM, ...(ss.airForm as Partial<AirPurifierForm> ?? {}) });
+  // Manual result edits are transient (not restored) so a stale override
+  // can never block the form from driving the result after a reload.
+  const [editedContents, setEditedContents] = useState<Record<number, string>>({});
+  const [editedTextOutput, setEditedTextOutput] = useState<string | null>(null);
 
   // On a restored session, skip the first auto-transform so it doesn't
   // re-parse and overwrite the restored form edits.
@@ -3163,20 +3140,6 @@ export default function App() {
 
   const currentItemForm = itemForms[selectedItem] ?? EMPTY_ITEM_FORM;
 
-  // Live preview of just the device currently being edited (or the whole
-  // single-device result), shown in a pinned panel above the action bar.
-  const previewText = useMemo(() => {
-    if (mode === "inspection") {
-      return extractItemBlock(effectiveTextOutput, selectedItem) || effectiveTextOutput;
-    }
-    if (mode === "blank-report") {
-      const item = displayedList[selectedItem];
-      return (editedContents[selectedItem] ?? item?.content) || "";
-    }
-    if (mode === "air-purifier") return effectiveTextOutput;
-    return "";
-  }, [mode, effectiveTextOutput, selectedItem, displayedList, editedContents]);
-
   const itemLabels = useMemo(() => {
     if (mode === "inspection") return extractInspectionItemLabels(textOutput);
     if (mode === "blank-report") {
@@ -3188,21 +3151,36 @@ export default function App() {
     return [];
   }, [mode, textOutput, listOutput]);
 
+  // Form is the source of truth: any form change discards a prior manual
+  // result edit so the change is reflected.
+  const clearManualEdits = () => {
+    setEditedTextOutput(null);
+    setEditedContents({});
+  };
+
   const setItemF = <K extends keyof PerItemForm>(key: K, value: PerItemForm[K]) => {
+    clearManualEdits();
     setItemForms((prev: PerItemForm[]) => prev.map((f: PerItemForm, i: number) =>
       i === selectedItem ? { ...f, [key]: value } : f,
     ));
   };
   const toggleItemF = (key: keyof PerItemForm, value: string) => {
+    clearManualEdits();
     setItemForms((prev: PerItemForm[]) => prev.map((f: PerItemForm, i: number) =>
       i === selectedItem ? { ...f, [key]: f[key] === value ? "" : value } : f,
     ));
   };
   const setSharedF = <K extends keyof SharedForm>(key: K, value: SharedForm[K]) => {
+    clearManualEdits();
     setSharedForm((prev: SharedForm) => ({ ...prev, [key]: value }));
   };
   const setAirF = <K extends keyof AirPurifierForm>(key: K, value: AirPurifierForm[K]) => {
+    clearManualEdits();
     setAirForm((prev: AirPurifierForm) => ({ ...prev, [key]: value }));
+  };
+  const handleSetAuthor = (v: string) => {
+    clearManualEdits();
+    setAuthor(v);
   };
 
   const lineStats = useMemo(() => {
@@ -3284,19 +3262,20 @@ export default function App() {
   }, [inputText, mode]);
 
   // Persist the working session (debounced) so it survives reloads.
+  // Manual result edits are intentionally excluded — the form drives.
   useEffect(() => {
     const handle = window.setTimeout(() => {
       try {
         localStorage.setItem("session_v1", JSON.stringify({
           mode, inputText, textOutput, listOutput, itemForms, sharedForm,
-          selectedItem, editedContents, editedTextOutput, airForm,
+          selectedItem, airForm,
         }));
       } catch {
         // ignore quota / private mode errors
       }
     }, 300);
     return () => window.clearTimeout(handle);
-  }, [mode, inputText, textOutput, listOutput, itemForms, sharedForm, selectedItem, editedContents, editedTextOutput, airForm]);
+  }, [mode, inputText, textOutput, listOutput, itemForms, sharedForm, selectedItem, airForm]);
 
   const handlePaste = async () => {
     const text = await pasteFromClipboard();
@@ -3360,7 +3339,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className={`mx-auto flex max-w-3xl flex-col px-3 pt-4 sm:px-6 sm:pt-6 ${showForm && previewText ? "pb-52" : "pb-32"}`}>
+      <div className="mx-auto flex max-w-3xl flex-col px-3 pb-28 pt-4 sm:px-6 sm:pt-6">
         {/* Header */}
         <header className="mb-4 flex items-center justify-between">
           <div>
@@ -3423,9 +3402,9 @@ export default function App() {
           />
         </section>
 
-        {/* Results */}
+        {/* Results — sticks to top while scrolling the form below */}
         {hasOutput && (
-          <section className="mb-3">
+          <section className="sticky top-0 z-20 mb-3 -mx-3 bg-slate-50 px-3 pb-2 pt-1 shadow-sm sm:-mx-6 sm:px-6">
             <div className="mb-2 flex items-center justify-between px-1">
               <div className="text-xs font-medium text-slate-600">
                 결과{" "}
@@ -3448,7 +3427,7 @@ export default function App() {
             </div>
 
             {isListMode ? (
-              <div className="space-y-2">
+              <div className="max-h-[55vh] space-y-2 overflow-y-auto">
                 {displayedList.map((item: ResultItem, index: number) => {
                   const hasWarning = Boolean(item.warning);
                   const isCopied = copiedIndex === index;
@@ -3518,7 +3497,7 @@ export default function App() {
                 <textarea
                   value={effectiveTextOutput}
                   onChange={(e) => setEditedTextOutput(e.target.value)}
-                  className="h-72 w-full resize-none bg-transparent font-mono text-xs leading-relaxed outline-none sm:h-96"
+                  className="h-[50vh] w-full resize-none bg-transparent font-mono text-xs leading-relaxed outline-none"
                 />
               </div>
             )}
@@ -3540,7 +3519,7 @@ export default function App() {
             accent={config.accent}
             bgSoft={config.bgSoft}
             author={author}
-            setAuthor={setAuthor}
+            setAuthor={handleSetAuthor}
             showLevel={mode === "blank-report"}
             showHantinParking={mode === "blank-report"}
           />
@@ -3553,7 +3532,7 @@ export default function App() {
             setAirF={setAirF}
             accent={config.accent}
             author={author}
-            setAuthor={setAuthor}
+            setAuthor={handleSetAuthor}
           />
         )}
 
@@ -3591,30 +3570,8 @@ export default function App() {
         )}
       </div>
 
-      {/* Sticky bottom: live preview + action bar */}
+      {/* Sticky bottom action bar — thumb zone */}
       <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 backdrop-blur">
-        {showForm && previewText && (
-          <div className="mx-auto max-w-3xl px-3 sm:px-6">
-            <button
-              type="button"
-              onClick={() => setPreviewOpen((v) => !v)}
-              className="flex w-full items-center justify-between py-2 text-xs font-semibold"
-              style={{ color: config.accent }}
-            >
-              <span>
-                📄 미리보기
-                {itemForms.length > 1 ? ` · ${itemLabels[selectedItem] ?? `${selectedItem + 1}.`}` : ""}
-              </span>
-              <span className="text-[10px] text-slate-400">{previewOpen ? "접기 ▼" : "펼치기 ▲"}</span>
-            </button>
-            <pre
-              className="overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-2 font-mono text-[11px] leading-snug text-slate-800 transition-all"
-              style={{ maxHeight: previewOpen ? "45vh" : "4.5rem" }}
-            >
-              {previewText}
-            </pre>
-          </div>
-        )}
         <div className="mx-auto flex max-w-3xl items-center gap-2 px-3 py-3 sm:px-6">
           <button
             onClick={handleReset}
