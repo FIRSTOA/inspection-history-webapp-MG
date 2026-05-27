@@ -1888,8 +1888,7 @@ type PerItemForm = {
   waste: string;
   spareRaw: string;
   hantin: string;
-  parkingChip: string;
-  parkingCustom: string;
+  parking: string;
   notes: string;
 };
 
@@ -1900,7 +1899,7 @@ const EMPTY_ITEM_FORM: PerItemForm = {
   waste: "",
   spareRaw: "",
   hantin: "",
-  parkingChip: "", parkingCustom: "",
+  parking: "",
   notes: "",
 };
 
@@ -2097,8 +2096,8 @@ function applyProcessingFormV2(
       }
       if (/^주차비지원유무\s*:/.test(line)) {
         const existing = parseValueAfterColon(line, "주차비지원유무");
-        const parkingValue = f.parkingCustom.trim() || f.parkingChip || existing;
-        out.push(suffixIfValue("주차비지원유무:", parkingValue));
+        const v = f.parking.trim() || existing;
+        out.push(suffixIfValue("주차비지원유무:", v));
         continue;
       }
       if (/^특이사항\s*:/.test(line)) {
@@ -2192,6 +2191,16 @@ function parseItemDataFromText(text: string, count: number): PerItemForm[] {
       collecting = "spare";
       continue;
     }
+    if (/^한틴이카유무\s*:/.test(line)) {
+      forms[idx].hantin = parseValueAfterColon(line, "한틴이카유무");
+      collecting = null;
+      continue;
+    }
+    if (/^주차비지원유무\s*:/.test(line)) {
+      forms[idx].parking = parseValueAfterColon(line, "주차비지원유무");
+      collecting = null;
+      continue;
+    }
     if (/^특이사항\s*:/.test(line)) {
       forms[idx].notes = parseValueAfterColon(line, "특이사항");
       collecting = "note";
@@ -2205,6 +2214,35 @@ function parseItemDataFromText(text: string, count: number): PerItemForm[] {
     collecting = null;
   }
   return forms;
+}
+
+type ResultBlock = { text: string; device: number | null };
+
+// Splits a rendered inspection result into header / per-device / footer
+// blocks so the bottom result panel can jump to the device being edited.
+function splitResultBlocks(text: string): ResultBlock[] {
+  if (!text) return [];
+  const lines = text.split("\n");
+  const starts = itemStartFlags(lines);
+  const blocks: ResultBlock[] = [];
+  let cur: string[] = [];
+  let curDevice: number | null = null;
+  let deviceIdx = -1;
+  let inFooter = false;
+
+  const flush = () => {
+    const t = cur.join("\n").replace(/^\n+|\n+$/g, "");
+    if (t.trim()) blocks.push({ text: t, device: curDevice });
+    cur = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!inFooter && /^※/.test(lines[i])) { flush(); inFooter = true; curDevice = null; }
+    else if (starts[i]) { flush(); deviceIdx++; curDevice = deviceIdx; }
+    cur.push(lines[i]);
+  }
+  flush();
+  return blocks;
 }
 
 function countInspectionItems(text: string): number {
@@ -2285,14 +2323,12 @@ function applyAirPurifierForm(text: string, f: AirPurifierForm, author: string):
   }).join("\n");
 }
 
-const WASTE_OPTIONS = ["10", "20", "30", "40", "50", "60", "70", "80", "90", "100"];
 const HANTIN_OPTIONS = ["한공", "한조", "한조해지업체", "보안으로 설치불가", "고객불편으로 설치불가", "무"];
 const PARKING_OPTIONS = ["유", "무"];
 const SHIP_OPTIONS = ["출고부탁드립니다", "선출고완료"];
 const HOUR_OPTIONS = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"];
 const MINUTE_OPTIONS = ["00", "10", "20", "30", "40", "50"];
 const DURATION_STEPS = [1, 5, 10, 30, 60];
-const TONER_STEPS = [1, 5, 10, 50, 100];
 const LEVEL_OPTIONS = ["1", "2", "3", "4", "5"];
 const YESNO_OPTIONS = ["유", "무"];
 
@@ -2506,7 +2542,6 @@ function AuthorPicker({ value, onChange, accent }: AuthorPickerProps) {
 type ProcessingFormPanelProps = {
   itemForm: PerItemForm;
   setItemF: <K extends keyof PerItemForm>(key: K, value: PerItemForm[K]) => void;
-  toggleItemF: (key: keyof PerItemForm, value: string) => void;
   shared: SharedForm;
   setSharedF: <K extends keyof SharedForm>(key: K, value: SharedForm[K]) => void;
   itemCount: number;
@@ -2522,7 +2557,7 @@ type ProcessingFormPanelProps = {
 };
 
 function ProcessingFormPanel({
-  itemForm, setItemF, toggleItemF,
+  itemForm, setItemF,
   shared, setSharedF,
   itemCount, itemLabels, selectedItem, setSelectedItem,
   accent, bgSoft,
@@ -2634,58 +2669,40 @@ function ProcessingFormPanel({
         </div>
       </div>
 
-      {/* 토너잔량 — 누적 버튼 (값 위에 +N) */}
+      {/* 토너잔량 — 직접 입력 (K/C/M/Y) */}
       <div className="mb-2 rounded-xl p-2" style={{ background: bgSoft }}>
         <div className="mb-1 text-xs font-semibold text-slate-700">토너잔량 (%)</div>
-        <div className="space-y-1.5">
+        <div className="grid grid-cols-4 gap-1.5">
           {(["K", "C", "M", "Y"] as const).map((ch: "K" | "C" | "M" | "Y") => {
             const key = (`toner${ch}`) as "tonerK" | "tonerC" | "tonerM" | "tonerY";
-            const val = itemForm[key];
             return (
-              <div key={ch}>
-                <div className="mb-0.5 flex items-center gap-1.5">
-                  <span
-                    className="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-slate-300"
-                    style={{ background: TONER_COLORS[ch] }}
-                  />
-                  <span className="w-4 shrink-0 text-xs font-semibold text-slate-600">{ch}</span>
-                  <span className="text-sm font-bold" style={{ color: accent }}>{val ? `${val}%` : "0%"}</span>
-                  {val && (
-                    <button
-                      type="button"
-                      onClick={() => setItemF(key, "")}
-                      className="ml-auto rounded-md bg-white px-2 py-0.5 text-[11px] text-slate-500 active:scale-95"
-                    >
-                      초기화
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-5 gap-1">
-                  {TONER_STEPS.map((step: number) => (
-                    <button
-                      key={step}
-                      type="button"
-                      onClick={() => {
-                        const cap = ch === "K" ? 200 : 100;
-                        const cur = parseInt(val || "0", 10) || 0;
-                        setItemF(key, String(Math.min(cap, cur + step)));
-                      }}
-                      className="rounded-lg bg-white py-2 text-xs font-semibold text-slate-700 transition active:scale-95"
-                    >
-                      +{step}
-                    </button>
-                  ))}
-                </div>
+              <div key={ch} className="flex items-center gap-1">
+                <span
+                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-slate-300"
+                  style={{ background: TONER_COLORS[ch] }}
+                />
+                <span className="shrink-0 text-xs font-semibold text-slate-600">{ch}</span>
+                <input
+                  inputMode="numeric"
+                  value={itemForm[key]}
+                  onChange={(e) => setItemF(key, e.target.value)}
+                  className="w-full min-w-0 rounded-lg bg-white px-1.5 py-1.5 text-sm outline-none"
+                />
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* 폐통 */}
-      <div className="mb-2">
-        <div className="mb-1 text-xs font-semibold text-slate-700">폐통 (%)</div>
-        <NumSelect value={itemForm.waste} onChange={(v) => setItemF("waste", v)} options={WASTE_OPTIONS} accent={accent} suffix="%" />
+      {/* 폐통 — 직접 입력 */}
+      <div className="mb-2 flex items-center gap-2">
+        <div className="shrink-0 text-xs font-semibold text-slate-700">폐통 (%)</div>
+        <input
+          inputMode="numeric"
+          value={itemForm.waste}
+          onChange={(e) => setItemF("waste", e.target.value)}
+          className="w-24 rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white"
+        />
       </div>
 
       {/* 여분 — 원본 그대로 직접 수정 */}
@@ -2702,17 +2719,17 @@ function ProcessingFormPanel({
 
       {showHantinParking && (
         <>
-          {/* 한틴이카 */}
+          {/* 한틴이카 — 칩 빠른선택 + 직접입력 */}
           <div className="mb-2">
             <div className="mb-1 text-xs font-semibold text-slate-700">한틴이카유무</div>
-            <div className="flex flex-wrap gap-1">
+            <div className="mb-1 flex flex-wrap gap-1">
               {HANTIN_OPTIONS.map((opt: string) => {
                 const active = itemForm.hantin === opt;
                 return (
                   <button
                     key={opt}
                     type="button"
-                    onClick={() => toggleItemF("hantin", opt)}
+                    onClick={() => setItemF("hantin", active ? "" : opt)}
                     className="rounded-full px-2.5 py-1 text-xs font-medium transition active:scale-95"
                     style={{
                       background: active ? accent : "#F1F5F9",
@@ -2724,22 +2741,26 @@ function ProcessingFormPanel({
                 );
               })}
             </div>
+            <input
+              type="text"
+              placeholder="직접 입력"
+              value={itemForm.hantin}
+              onChange={(e) => setItemF("hantin", e.target.value)}
+              className="w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white"
+            />
           </div>
 
-          {/* 주차비 */}
+          {/* 주차비 — 칩 빠른선택 + 직접입력 */}
           <div className="mb-2">
             <div className="mb-1 text-xs font-semibold text-slate-700">주차비지원유무</div>
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="mb-1 flex flex-wrap gap-1">
               {PARKING_OPTIONS.map((opt: string) => {
-                const active = itemForm.parkingChip === opt;
+                const active = itemForm.parking === opt;
                 return (
                   <button
                     key={opt}
                     type="button"
-                    onClick={() => {
-                      toggleItemF("parkingChip", opt);
-                      if (itemForm.parkingChip !== opt) setItemF("parkingCustom", "");
-                    }}
+                    onClick={() => setItemF("parking", active ? "" : opt)}
                     className="rounded-full px-3 py-1 text-xs font-medium transition active:scale-95"
                     style={{
                       background: active ? accent : "#F1F5F9",
@@ -2750,17 +2771,14 @@ function ProcessingFormPanel({
                   </button>
                 );
               })}
-              <input
-                type="text"
-                placeholder="직접 입력 (우선 적용)"
-                value={itemForm.parkingCustom}
-                onChange={(e) => {
-                  setItemF("parkingCustom", e.target.value);
-                  if (e.target.value) setItemF("parkingChip", "");
-                }}
-                className="ml-1 min-w-0 flex-1 rounded-lg bg-slate-50 px-2 py-1.5 text-xs outline-none focus:bg-white"
-              />
             </div>
+            <input
+              type="text"
+              placeholder="직접 입력"
+              value={itemForm.parking}
+              onChange={(e) => setItemF("parking", e.target.value)}
+              className="w-full rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white"
+            />
           </div>
         </>
       )}
@@ -3080,7 +3098,6 @@ export default function App() {
   const [textOutput, setTextOutput] = useState<string>((ss.textOutput as string) ?? "");
   const [listOutput, setListOutput] = useState<ResultItem[]>((ss.listOutput as ResultItem[]) ?? []);
   const [toast, setToast] = useState<{ text: string; kind: "success" | "error" } | null>(null);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [itemForms, setItemForms] = useState<PerItemForm[]>(
     Array.isArray(ss.itemForms) && ss.itemForms.length
       ? (ss.itemForms as PerItemForm[]).map((f) => ({ ...EMPTY_ITEM_FORM, ...f }))
@@ -3093,6 +3110,8 @@ export default function App() {
   // can never block the form from driving the result after a reload.
   const [editedContents, setEditedContents] = useState<Record<number, string>>({});
   const [editedTextOutput, setEditedTextOutput] = useState<string | null>(null);
+
+  const [resultOpen, setResultOpen] = useState<boolean>(true);
 
   // On a restored session, skip the first auto-transform so it doesn't
   // re-parse and overwrite the restored form edits.
@@ -3164,12 +3183,6 @@ export default function App() {
       i === selectedItem ? { ...f, [key]: value } : f,
     ));
   };
-  const toggleItemF = (key: keyof PerItemForm, value: string) => {
-    clearManualEdits();
-    setItemForms((prev: PerItemForm[]) => prev.map((f: PerItemForm, i: number) =>
-      i === selectedItem ? { ...f, [key]: f[key] === value ? "" : value } : f,
-    ));
-  };
   const setSharedF = <K extends keyof SharedForm>(key: K, value: SharedForm[K]) => {
     clearManualEdits();
     setSharedForm((prev: SharedForm) => ({ ...prev, [key]: value }));
@@ -3182,6 +3195,24 @@ export default function App() {
     clearManualEdits();
     setAuthor(v);
   };
+
+  // Result blocks for the bottom panel, tagged with their device index so
+  // selecting a device scrolls its block into view.
+  const resultBlocks = useMemo<ResultBlock[]>(() => {
+    if (mode === "inspection") return splitResultBlocks(effectiveTextOutput);
+    if (mode === "blank-report") {
+      return displayedList.map((item: ResultItem, i: number) => ({ text: item.content, device: i }));
+    }
+    if (mode === "air-purifier") return effectiveTextOutput ? [{ text: effectiveTextOutput, device: null }] : [];
+    if (mode === "samsung-note") return displayedList.map((item: ResultItem) => ({ text: item.content, device: null }));
+    return [];
+  }, [mode, effectiveTextOutput, displayedList]);
+
+  const deviceBlockRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  useEffect(() => {
+    const el = deviceBlockRefs.current[selectedItem];
+    if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedItem, resultBlocks]);
 
   const lineStats = useMemo(() => {
     const count = inputText ? inputText.split(/\r?\n/).length : 0;
@@ -3196,7 +3227,6 @@ export default function App() {
   const resetOutputs = () => {
     setTextOutput("");
     setListOutput([]);
-    setCopiedIndex(null);
     setEditedContents({});
     setEditedTextOutput(null);
   };
@@ -3229,7 +3259,6 @@ export default function App() {
     }
     setItemForms(nextItemForms);
     setSelectedItem(0);
-    setCopiedIndex(null);
     setEditedContents({});
     setEditedTextOutput(null);
   };
@@ -3287,17 +3316,6 @@ export default function App() {
     showToast("붙여넣기 완료");
   };
 
-  const handleCopyCard = async (text: string, index: number) => {
-    const result = await copyTextToClipboard(text);
-    if (result.ok) {
-      setCopiedIndex(index);
-      window.setTimeout(() => setCopiedIndex(null), 900);
-      showToast("복사 완료");
-    } else {
-      showToast(result.message, "error");
-    }
-  };
-
   const handleCopyAll = async () => {
     const target = isListMode
       ? displayedList.map((item: ResultItem, i: number) => editedContents[i] ?? item.content).join("\n\n")
@@ -3331,7 +3349,6 @@ export default function App() {
   };
 
   const hasOutput = textOutput.length > 0 || listOutput.length > 0;
-  const warningCount = displayedList.filter((item: ResultItem) => item.warning).length;
 
   const isDev = typeof import.meta !== "undefined" && import.meta.env && import.meta.env.DEV;
   const testResults = useMemo(() => (isDev ? runSelfTests() : []), [isDev]);
@@ -3339,7 +3356,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto flex max-w-3xl flex-col px-3 pb-28 pt-4 sm:px-6 sm:pt-6">
+      <div className={`mx-auto flex max-w-3xl flex-col px-3 pt-4 sm:px-6 sm:pt-6 ${hasOutput && resultOpen ? "pb-[55vh]" : "pb-28"}`}>
         {/* Header */}
         <header className="mb-4 flex items-center justify-between">
           <div>
@@ -3402,114 +3419,11 @@ export default function App() {
           />
         </section>
 
-        {/* Results — sticks to top while scrolling the form below */}
-        {hasOutput && (
-          <section className="sticky top-0 z-20 mb-3 -mx-3 bg-slate-50 px-3 pb-2 pt-1 shadow-sm sm:-mx-6 sm:px-6">
-            <div className="mb-2 flex items-center justify-between px-1">
-              <div className="text-xs font-medium text-slate-600">
-                결과{" "}
-                {isListMode && (
-                  <>
-                    <span className="text-slate-400">· {displayedList.length}건</span>
-                    {warningCount > 0 && (
-                      <span className="ml-1 text-amber-600">⚠️ {warningCount}건 확인 필요</span>
-                    )}
-                  </>
-                )}
-              </div>
-              <button
-                onClick={handleCopyAll}
-                className="text-xs font-medium"
-                style={{ color: config.accent }}
-              >
-                전체 복사
-              </button>
-            </div>
-
-            {isListMode ? (
-              <div className="max-h-[55vh] space-y-2 overflow-y-auto">
-                {displayedList.map((item: ResultItem, index: number) => {
-                  const hasWarning = Boolean(item.warning);
-                  const isCopied = copiedIndex === index;
-                  const text = editedContents[index] ?? item.content;
-                  const cardBg = isCopied
-                    ? "#D1FAE5"
-                    : hasWarning
-                      ? "#FEF3C7"
-                      : config.bgSoft;
-                  const borderColor = isCopied
-                    ? "#10B981"
-                    : hasWarning
-                      ? "#D97706"
-                      : config.accent;
-                  const lineCount = text.split("\n").length;
-
-                  return (
-                    <div
-                      key={index}
-                      className="rounded-xl p-3"
-                      style={{
-                        background: cardBg,
-                        borderLeft: `3px solid ${borderColor}`,
-                      }}
-                    >
-                      <div className="mb-1.5 flex items-center justify-between text-xs font-semibold">
-                        <span style={{ color: hasWarning ? "#92400E" : config.textDark }}>
-                          {hasWarning ? "⚠️" : ""} {index + 1}
-                          {hasWarning ? ` · ${item.warning}` : ""}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyCard(text, index)}
-                          className="rounded-md px-2 py-1 text-xs font-semibold transition active:scale-95"
-                          style={{
-                            background: isCopied ? "#10B981" : "white",
-                            color: isCopied ? "white" : config.accent,
-                            border: `1px solid ${isCopied ? "#10B981" : config.accent}`,
-                          }}
-                        >
-                          {isCopied ? "✓ 복사됨" : "📋 복사"}
-                        </button>
-                      </div>
-                      <textarea
-                        value={text}
-                        onChange={(e) =>
-                          setEditedContents((prev: Record<number, string>) => ({
-                            ...prev,
-                            [index]: e.target.value,
-                          }))
-                        }
-                        rows={Math.max(8, lineCount)}
-                        className="w-full resize-y rounded-lg bg-white/60 p-2 font-mono text-xs leading-relaxed text-slate-800 outline-none focus:bg-white"
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div
-                className="rounded-xl p-3"
-                style={{
-                  background: config.bgSoft,
-                  borderLeft: `3px solid ${config.accent}`,
-                }}
-              >
-                <textarea
-                  value={effectiveTextOutput}
-                  onChange={(e) => setEditedTextOutput(e.target.value)}
-                  className="h-[50vh] w-full resize-none bg-transparent font-mono text-xs leading-relaxed outline-none"
-                />
-              </div>
-            )}
-          </section>
-        )}
-
         {/* Processing form — 미양식 + 점검 */}
         {showForm && (
           <ProcessingFormPanel
             itemForm={currentItemForm}
             setItemF={setItemF}
-            toggleItemF={toggleItemF}
             shared={sharedForm}
             setSharedF={setSharedF}
             itemCount={itemForms.length}
@@ -3521,7 +3435,7 @@ export default function App() {
             author={author}
             setAuthor={handleSetAuthor}
             showLevel={mode === "blank-report"}
-            showHantinParking={mode === "blank-report"}
+            showHantinParking={mode === "blank-report" || mode === "inspection"}
           />
         )}
 
@@ -3570,8 +3484,57 @@ export default function App() {
         )}
       </div>
 
-      {/* Sticky bottom action bar — thumb zone */}
+      {/* Sticky bottom: result panel + action bar */}
       <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 backdrop-blur">
+        {hasOutput && (
+          <div className="mx-auto max-w-3xl px-3 sm:px-6">
+            <div className="flex items-center justify-between py-1.5">
+              <button
+                type="button"
+                onClick={() => setResultOpen((v) => !v)}
+                className="flex items-center gap-1 text-xs font-semibold"
+                style={{ color: config.accent }}
+              >
+                <span>📄 결과</span>
+                {itemForms.length > 1 && (
+                  <span className="text-slate-500">· {itemLabels[selectedItem] ?? `${selectedItem + 1}.`}</span>
+                )}
+                <span className="text-[10px] text-slate-400">{resultOpen ? "접기 ▼" : "펼치기 ▲"}</span>
+              </button>
+              <button
+                onClick={handleCopyAll}
+                className="text-xs font-medium"
+                style={{ color: config.accent }}
+              >
+                전체 복사
+              </button>
+            </div>
+            {resultOpen && (
+              <div className="space-y-1.5 overflow-y-auto pb-2" style={{ maxHeight: "42vh" }}>
+                {resultBlocks.map((block: ResultBlock, i: number) => {
+                  const active = block.device !== null && block.device === selectedItem;
+                  return (
+                    <div
+                      key={i}
+                      ref={(el) => {
+                        if (block.device !== null) deviceBlockRefs.current[block.device] = el;
+                      }}
+                      className="rounded-lg p-2"
+                      style={{
+                        background: active ? config.bgSoft : "#F8FAFC",
+                        borderLeft: `3px solid ${active ? config.accent : "transparent"}`,
+                      }}
+                    >
+                      <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-snug text-slate-800">
+                        {block.text}
+                      </pre>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         <div className="mx-auto flex max-w-3xl items-center gap-2 px-3 py-3 sm:px-6">
           <button
             onClick={handleReset}
