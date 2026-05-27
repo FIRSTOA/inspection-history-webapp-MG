@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
 import { AUTHOR_BOOK, AUTHOR_TEAMS } from "./authors";
 import type { AuthorTeam } from "./authors";
 
@@ -3094,7 +3093,9 @@ export default function App() {
   const ss = savedSession ?? {};
 
   const [mode, setMode] = useState<Mode>((ss.mode as Mode) ?? "inspection");
-  const [inputText, setInputText] = useState<string>((ss.inputText as string) ?? "");
+  // Original input is entered via a popup and not persisted (blank next time);
+  // the converted result/forms are persisted so work isn't lost.
+  const [inputText, setInputText] = useState<string>("");
   const [textOutput, setTextOutput] = useState<string>((ss.textOutput as string) ?? "");
   const [listOutput, setListOutput] = useState<ResultItem[]>((ss.listOutput as ResultItem[]) ?? []);
   const [toast, setToast] = useState<{ text: string; kind: "success" | "error" } | null>(null);
@@ -3112,11 +3113,15 @@ export default function App() {
   // transient (not persisted) so a stale override never blocks the form.
   const [editedBlocks, setEditedBlocks] = useState<Record<number, string>>({});
   const [helpOpen, setHelpOpen] = useState<boolean>(false);
+  const [inputModalOpen, setInputModalOpen] = useState<boolean>(false);
+  const [draftInput, setDraftInput] = useState<string>("");
 
 
   // On a restored session, skip the first auto-transform so it doesn't
   // re-parse and overwrite the restored form edits.
-  const skipAutoRef = useRef<boolean>(Boolean(savedSession && ss.inputText));
+  const skipAutoRef = useRef<boolean>(
+    Boolean(savedSession && (ss.textOutput || (Array.isArray(ss.listOutput) && ss.listOutput.length))),
+  );
 
   const [author, setAuthor] = useState<string>(() => {
     try { return localStorage.getItem("author") || ""; } catch { return ""; }
@@ -3235,7 +3240,14 @@ export default function App() {
   };
 
   const handleModeChange = (next: Mode) => {
+    if (next === mode) return;
+    // Each mode takes its own input, so switching starts fresh.
     setMode(next);
+    setInputText("");
+    resetOutputs();
+    setItemForms([{ ...EMPTY_ITEM_FORM }]);
+    setSharedForm(EMPTY_SHARED_FORM);
+    setSelectedItem(0);
   };
 
   const runTransform = (text: string, m: Mode) => {
@@ -3265,14 +3277,6 @@ export default function App() {
     setEditedBlocks({});
   };
 
-  const handleTransform = () => {
-    if (!inputText.trim()) {
-      showToast("입력이 비어있어요", "error");
-      return;
-    }
-    runTransform(inputText, mode);
-  };
-
   // Auto-transform on input or mode change (debounced)
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -3280,25 +3284,20 @@ export default function App() {
         skipAutoRef.current = false;
         return;
       }
-      if (!inputText.trim()) {
-        resetOutputs();
-        setItemForms([{ ...EMPTY_ITEM_FORM }]);
-        setSharedForm(EMPTY_SHARED_FORM);
-        setSelectedItem(0);
-        return;
-      }
-      runTransform(inputText, mode);
+      // Empty input doesn't wipe outputs (mode change / 초기화 handle that),
+      // so a restored result survives.
+      if (inputText.trim()) runTransform(inputText, mode);
     }, 200);
     return () => window.clearTimeout(handle);
   }, [inputText, mode]);
 
   // Persist the working session (debounced) so it survives reloads.
-  // Manual result edits are intentionally excluded — the form drives.
+  // inputText and manual result edits are intentionally excluded.
   useEffect(() => {
     const handle = window.setTimeout(() => {
       try {
         localStorage.setItem("session_v1", JSON.stringify({
-          mode, inputText, textOutput, listOutput, itemForms, sharedForm,
+          mode, textOutput, listOutput, itemForms, sharedForm,
           selectedItem, airForm,
         }));
       } catch {
@@ -3306,16 +3305,24 @@ export default function App() {
       }
     }, 300);
     return () => window.clearTimeout(handle);
-  }, [mode, inputText, textOutput, listOutput, itemForms, sharedForm, selectedItem, airForm]);
+  }, [mode, textOutput, listOutput, itemForms, sharedForm, selectedItem, airForm]);
 
-  const handlePaste = async () => {
+  const openInputModal = () => {
+    setDraftInput(inputText);
+    setInputModalOpen(true);
+  };
+  const handlePasteToDraft = async () => {
     const text = await pasteFromClipboard();
     if (text === null) {
       showToast("클립보드 권한이 필요해요", "error");
       return;
     }
-    setInputText(text);
-    showToast("붙여넣기 완료");
+    setDraftInput(text);
+  };
+  const confirmInputModal = () => {
+    setInputText(draftInput);
+    if (!draftInput.trim()) resetOutputs();
+    setInputModalOpen(false);
   };
 
   const handleCopyAll = async () => {
@@ -3343,12 +3350,6 @@ export default function App() {
     showToast("초기화 완료");
   };
 
-  const handleInputKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault();
-      handleTransform();
-    }
-  };
 
   const hasOutput = textOutput.length > 0 || listOutput.length > 0;
 
@@ -3410,26 +3411,20 @@ export default function App() {
           })}
         </div>
 
-        {/* Input */}
-        <section className="mb-3 rounded-2xl bg-white p-3 shadow-sm sm:p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <label className="text-xs font-medium text-slate-600">원본 입력</label>
-            <button
-              onClick={handlePaste}
-              className="rounded-lg px-2 py-1 text-xs font-medium transition active:scale-95"
-              style={{ color: config.accent, background: config.bgSoft }}
-            >
-              📋 붙여넣기
-            </button>
-          </div>
-          <textarea
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleInputKeyDown}
-            placeholder={config.placeholder}
-            className="h-44 w-full resize-none rounded-xl bg-slate-50 p-3 font-mono text-sm outline-none transition focus:bg-white sm:h-56"
-            style={{ borderColor: config.accent }}
-          />
+        {/* Input — opens a popup so the page has no big scroll-trapping box */}
+        <section className="mb-3">
+          <button
+            type="button"
+            onClick={openInputModal}
+            className="flex w-full items-center justify-between rounded-2xl bg-white p-4 text-left shadow-sm"
+          >
+            <span className="text-sm font-medium" style={{ color: config.accent }}>
+              📋 원본 붙여넣기 / 입력
+            </span>
+            <span className="text-xs text-slate-400">
+              {inputText.trim() ? `${lineStats} 입력됨` : "탭하세요"}
+            </span>
+          </button>
         </section>
 
         {/* Processing form — 미양식 + 점검 */}
@@ -3551,6 +3546,55 @@ export default function App() {
         </div>
       </div>
 
+      {/* 원본 입력 팝업 */}
+      {inputModalOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end bg-black/50 sm:items-center sm:justify-center"
+          onClick={() => setInputModalOpen(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white sm:max-w-lg sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <span className="text-sm font-bold text-slate-800">원본 입력</span>
+              <button
+                type="button"
+                onClick={handlePasteToDraft}
+                className="rounded-lg px-2 py-1 text-xs font-medium"
+                style={{ color: config.accent, background: config.bgSoft }}
+              >
+                📋 붙여넣기
+              </button>
+            </div>
+            <textarea
+              value={draftInput}
+              onChange={(e) => setDraftInput(e.target.value)}
+              placeholder={config.placeholder}
+              autoFocus
+              className="m-3 h-[45vh] resize-none rounded-xl bg-slate-50 p-3 font-mono text-sm outline-none focus:bg-white"
+            />
+            <div className="flex gap-2 border-t border-slate-100 p-3">
+              <button
+                type="button"
+                onClick={() => setInputModalOpen(false)}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmInputModal}
+                className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white"
+                style={{ background: config.accent }}
+              >
+                확인 (변환)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 사용 설명서 */}
       {helpOpen && (
         <div
@@ -3582,7 +3626,7 @@ export default function App() {
                 <div className="mb-1 font-bold text-slate-900">기본 순서 (이것만 기억!)</div>
                 <ol className="ml-4 list-decimal space-y-1">
                   <li>맨 위에서 <b>탭</b> 고르기</li>
-                  <li><b>원본 입력</b> 칸에 붙여넣기 → 자동으로 결과가 만들어져요</li>
+                  <li><b>원본 붙여넣기</b> 버튼 → 팝업에 붙여넣고 <b>확인</b> → 결과가 만들어져요</li>
                   <li><b>작성자</b> 고르고, 빈 칸 채우기</li>
                   <li>맨 아래 <b>결과</b> 확인 (필요하면 직접 고치기)</li>
                   <li>맨 아래 <b>📋 복사</b> → 메신저에 붙여넣기</li>
