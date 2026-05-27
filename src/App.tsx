@@ -3112,7 +3112,6 @@ export default function App() {
   // transient (not persisted) so a stale override never blocks the form.
   const [editedBlocks, setEditedBlocks] = useState<Record<number, string>>({});
 
-  const [resultOpen, setResultOpen] = useState<boolean>(true);
 
   // On a restored session, skip the first auto-transform so it doesn't
   // re-parse and overwrite the restored form edits.
@@ -3358,7 +3357,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className={`mx-auto flex max-w-3xl flex-col px-3 pt-4 sm:px-6 sm:pt-6 ${hasOutput && resultOpen ? "pb-[34vh]" : "pb-28"}`}>
+      <div className={`mx-auto flex max-w-3xl flex-col px-3 pt-4 sm:px-6 sm:pt-6 ${hasOutput ? "pb-[42vh]" : "pb-28"}`}>
         {/* Header */}
         <header className="mb-4 flex items-center justify-between">
           <div>
@@ -3489,30 +3488,8 @@ export default function App() {
       {/* Sticky bottom: result panel + action bar */}
       <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 backdrop-blur">
         {hasOutput && (
-          <div className="mx-auto max-w-3xl px-3 sm:px-6">
-            <div className="flex items-center justify-between py-1.5">
-              <button
-                type="button"
-                onClick={() => setResultOpen((v) => !v)}
-                className="flex items-center gap-1 text-xs font-semibold"
-                style={{ color: config.accent }}
-              >
-                <span>📄 결과</span>
-                {itemForms.length > 1 && (
-                  <span className="text-slate-500">· {itemLabels[selectedItem] ?? `${selectedItem + 1}.`}</span>
-                )}
-                <span className="text-[10px] text-slate-400">{resultOpen ? "접기 ▼" : "펼치기 ▲"}</span>
-              </button>
-              <button
-                onClick={handleCopyAll}
-                className="text-xs font-medium"
-                style={{ color: config.accent }}
-              >
-                전체 복사
-              </button>
-            </div>
-            {resultOpen && (
-              <div ref={resultScrollRef} className="relative space-y-1.5 overflow-y-auto pb-2" style={{ maxHeight: "22vh" }}>
+          <div className="mx-auto max-w-3xl px-3 pt-1.5 sm:px-6">
+            <div ref={resultScrollRef} className="relative space-y-1.5 overflow-y-auto pb-2" style={{ maxHeight: "30vh" }}>
                 {resultBlocks.map((block: ResultBlock, i: number) => {
                   const active = block.device !== null && block.device === selectedItem;
                   const text = editedBlocks[i] ?? block.text;
@@ -3539,8 +3516,7 @@ export default function App() {
                     </div>
                   );
                 })}
-              </div>
-            )}
+            </div>
           </div>
         )}
         <div className="mx-auto flex max-w-3xl items-center gap-2 px-3 py-3 sm:px-6">
