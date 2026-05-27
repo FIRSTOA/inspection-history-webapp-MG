@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { AUTHOR_BOOK, AUTHOR_TEAMS } from "./authors";
 import type { AuthorTeam } from "./authors";
 
@@ -150,11 +150,24 @@ function buildItemTitleLine(cleaned: string[], blockIndex: number): string {
   const firstLine = cleaned[0] || "";
   const modelIndex = cleaned.findIndex((line: string) => /^모델명\s*:/.test(line));
 
+  // Location can sit on its own line(s) between the number and 모델명
+  // (e.g. "1." then "3층"). Gather those non-field lines into the title.
+  const gatherLoc = (startIdx: number): string => {
+    if (modelIndex <= startIdx) return "";
+    return cleaned
+      .slice(startIdx, modelIndex)
+      .filter((l: string) => l.trim() && !/:/.test(l))
+      .join(" ")
+      .trim();
+  };
+
   // Preserve & normalize existing title (all legacy formats → N.)
   const titleMatch = firstLine.match(/^(?:(\d+)\.|\((\d+)\)|【(\d+)】)\s*(.*)$/);
   if (titleMatch) {
     const num = titleMatch[1] || titleMatch[2] || titleMatch[3];
-    const rest = (titleMatch[4] || "").trim();
+    let rest = (titleMatch[4] || "").trim();
+    const loc = gatherLoc(1);
+    if (loc) rest = rest ? `${rest} ${loc}` : loc;
     return rest ? `${num}. ${rest}` : `${num}.`;
   }
 
@@ -1873,14 +1886,7 @@ type PerItemForm = {
   tonerM: string;
   tonerY: string;
   waste: string;
-  spareK: string;
-  spareC: string;
-  spareM: string;
-  spareY: string;
-  spareWaste: string;
-  spareDrum: string;
-  spareNote: string;
-  spareShared: string;
+  spareRaw: string;
   hantin: string;
   parkingChip: string;
   parkingCustom: string;
@@ -1892,7 +1898,7 @@ const EMPTY_ITEM_FORM: PerItemForm = {
   mailBlack: "", mailColor: "", mailLargeColor: "", mailTotal: "",
   tonerK: "", tonerC: "", tonerM: "", tonerY: "",
   waste: "",
-  spareK: "", spareC: "", spareM: "", spareY: "", spareWaste: "", spareDrum: "", spareNote: "", spareShared: "",
+  spareRaw: "",
   hantin: "",
   parkingChip: "", parkingCustom: "",
   notes: "",
@@ -1998,47 +2004,21 @@ function mergeWasteLine(line: string, f: PerItemForm): string {
   return `폐통: ${f.waste.trim()}%`;
 }
 
-// Parses a free-form 여분 line into structured channel counts plus any
-// trailing location note. K also accepts a bare 토너 (mono printers).
-// '공용' (shared with an adjacent device) is detected as a whole-line flag.
-function parseSpareInput(line: string): {
-  K: string; C: string; M: string; Y: string; waste: string; drum: string; note: string; shared: string;
-} {
-  const r = { K: "", C: "", M: "", Y: "", waste: "", drum: "", note: "", shared: "" };
-  if (/공용/.test(line)) r.shared = "공용";
-  // Trailing note: from the first "(" to end of line.
-  const noteMatch = line.match(/(\(.*)$/);
-  if (noteMatch) r.note = noteMatch[1].trim();
-  const body = noteMatch ? line.slice(0, noteMatch.index) : line;
-  const grab = (re: RegExp): string => {
-    const m = body.match(re);
-    return m ? m[1] : "";
-  };
-  r.K = grab(/K\s*-?\s*(\d+)/i) || grab(/토너\s*-?\s*(\d+)/);
-  r.C = grab(/C\s*-?\s*(\d+)/i);
-  r.M = grab(/M\s*-?\s*(\d+)/i);
-  r.Y = grab(/Y\s*-?\s*(\d+)/i);
-  r.waste = grab(/폐\s*-?\s*(\d+)/);
-  r.drum = grab(/드럼\s*-?\s*(\d+)/);
-  // "1set" / "1세트" / "1셋" = one set of each color toner (K=C=M=Y).
-  const setMatch = body.match(/(\d+)\s*(?:set|세트|셋)/i);
-  if (setMatch && !r.K && !r.C && !r.M && !r.Y) {
-    r.K = r.C = r.M = r.Y = setMatch[1];
-  }
-  return r;
+// 여분 is kept as free text (the user edits the original directly), so it
+// renders straight from the stored raw string. Multi-line notes are joined
+// with newlines and emitted as-is.
+function renderSpareLine(f: PerItemForm): string {
+  const raw = f.spareRaw.replace(/\s+$/, "");
+  return raw ? `여분: ${raw.replace(/^\s+/, "")}` : "여분:";
 }
 
-// Renders the canonical "여분: K- C- M- Y- 폐-" line from the form,
-// appending 드럼 and any preserved note. '공용' overrides the channels.
-function renderSpareLine(f: PerItemForm): string {
-  if (f.spareShared.trim()) {
-    return `여분: 공용${f.spareNote.trim() ? ` ${f.spareNote.trim()}` : ""}`;
-  }
-  const base = `여분: K-${f.spareK.trim()} C-${f.spareC.trim()} M-${f.spareM.trim()} Y-${f.spareY.trim()} 폐-${f.spareWaste.trim()}`;
-  const drum = f.spareDrum.trim() ? ` 드럼-${f.spareDrum.trim()}` : "";
-  const note = f.spareNote.trim() ? ` ${f.spareNote.trim()}` : "";
-  return base + drum + note;
+// Structural lines that end a 여분/특이사항 free-text block.
+const FIELD_MARKER_REGEX = /^(작성자|구분|레벨|등급|업체명|부서명|지역|키맨\/접수자|모델명|시리얼넘버|자산기번|내용|처리내용|매수|토너잔량|폐통|여분|한틴이카유무|주차비지원유무|특이사항|보증기간 내 여부|교체 전 카운터 누적 사용매수|사용 부품 예상 사용매수|물품명|물품|수량|출고여부|도착 시간|소요 시간)\s*:/;
+
+function isStructuralLine(line: string, isStart: boolean): boolean {
+  return isStart || isDividerLine(line) || /^※/.test(line) || FIELD_MARKER_REGEX.test(line);
 }
+
 
 // A numbered line ("1.", "2. 7층") only starts a new item when it directly
 // follows a divider — this avoids treating numbered lines inside multi-line
@@ -2063,17 +2043,17 @@ function applyProcessingFormV2(
 ): string {
   let itemIdx = -1;
   let section: "" | "parts" | "self" = "";
-  let skipNoteCont = false;
+  let skipCont = false;
   const out: string[] = [];
   const lines = text.split("\n");
   const starts = itemStartFlags(lines);
 
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li];
-    // Skip continuation lines of a 특이사항 we've already re-rendered from the form.
-    if (skipNoteCont) {
-      if (isDividerLine(line) || /^※/.test(line) || starts[li]) {
-        skipNoteCont = false;
+    // Skip continuation lines of a 여분/특이사항 we've already re-rendered.
+    if (skipCont) {
+      if (isStructuralLine(line, starts[li])) {
+        skipCont = false;
       } else {
         continue;
       }
@@ -2108,7 +2088,7 @@ function applyProcessingFormV2(
       if (/^매수\s*:/.test(line)) { out.push(mergeMailLine(line, f)); continue; }
       if (/^토너잔량\s*:/.test(line)) { out.push(mergeTonerLine(line, f)); continue; }
       if (/^폐통\s*:/.test(line)) { out.push(mergeWasteLine(line, f)); continue; }
-      if (/^여분\s*:/.test(line)) { out.push(renderSpareLine(f)); continue; }
+      if (/^여분\s*:/.test(line)) { out.push(renderSpareLine(f)); skipCont = true; continue; }
       if (/^한틴이카유무\s*:/.test(line)) {
         const existing = parseValueAfterColon(line, "한틴이카유무");
         const v = f.hantin.trim() || existing;
@@ -2124,7 +2104,7 @@ function applyProcessingFormV2(
       if (/^특이사항\s*:/.test(line)) {
         const notes = f.notes.trim();
         out.push(notes ? `특이사항: ${notes}` : "특이사항:");
-        skipNoteCont = true;
+        skipCont = true;
         continue;
       }
     }
@@ -2191,40 +2171,38 @@ function applyProcessingFormV2(
   return out.join("\n");
 }
 
-// Pre-fills per-item forms from a transformed result: parses each item's
-// 여분 (into channel counts/note/공용) and 특이사항 so the form boxes show
-// the existing values for the user to confirm or edit.
+// Pre-fills per-item forms from a transformed result: captures each item's
+// 여분 (raw text, multi-line) and 특이사항 so the form boxes show the
+// existing values for the user to confirm or edit.
 function parseItemDataFromText(text: string, count: number): PerItemForm[] {
   const forms: PerItemForm[] = Array.from({ length: count }, () => ({ ...EMPTY_ITEM_FORM }));
   let idx = -1;
-  let collectingNote = false;
+  let collecting: "spare" | "note" | null = null;
   const lines = text.split("\n");
   const starts = itemStartFlags(lines);
 
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li];
-    if (starts[li]) { idx++; collectingNote = false; continue; }
-    if (isDividerLine(line) || /^※/.test(line)) { collectingNote = false; continue; }
+    if (starts[li]) { idx++; collecting = null; continue; }
+    if (isDividerLine(line) || /^※/.test(line)) { collecting = null; continue; }
     if (idx < 0 || idx >= count) continue;
 
     if (/^여분\s*:/.test(line)) {
-      const p = parseSpareInput(line);
-      const f = forms[idx];
-      f.spareK = p.K; f.spareC = p.C; f.spareM = p.M; f.spareY = p.Y;
-      f.spareWaste = p.waste; f.spareDrum = p.drum; f.spareNote = p.note; f.spareShared = p.shared;
-      collectingNote = false;
+      forms[idx].spareRaw = parseValueAfterColon(line, "여분");
+      collecting = "spare";
       continue;
     }
     if (/^특이사항\s*:/.test(line)) {
       forms[idx].notes = parseValueAfterColon(line, "특이사항");
-      collectingNote = true;
+      collecting = "note";
       continue;
     }
-    if (collectingNote && !/^(모델명|시리얼넘버|자산기번|내용|처리내용|매수|토너잔량|폐통|여분|한틴이카유무|주차비지원유무)\s*:/.test(line)) {
-      forms[idx].notes = forms[idx].notes ? `${forms[idx].notes}\n${line}` : line;
+    if (collecting && !FIELD_MARKER_REGEX.test(line)) {
+      const key = collecting === "spare" ? "spareRaw" : "notes";
+      forms[idx][key] = forms[idx][key] ? `${forms[idx][key]}\n${line}` : line;
       continue;
     }
-    collectingNote = false;
+    collecting = null;
   }
   return forms;
 }
@@ -2280,6 +2258,7 @@ function extractInspectionItemLabels(text: string): string[] {
     labels.push(`${idx + 1}. ${parts.length ? parts.join("/") : "(미상)"}`);
   };
 
+  let collectingLoc = false;
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li];
     if (starts[li]) {
@@ -2288,14 +2267,20 @@ function extractInspectionItemLabels(text: string): string[] {
       const titleMatch = line.match(/^\s*\d+\.\s*(.*)$/);
       location = titleMatch ? titleMatch[1].trim() : "";
       model = serial = asset = "";
+      collectingLoc = true;
       continue;
     }
     const mm = line.match(/^모델명\s*:\s*(.*)$/);
-    if (mm) { model = mm[1]; continue; }
+    if (mm) { model = mm[1]; collectingLoc = false; continue; }
     const ms = line.match(/^시리얼넘버\s*:\s*(.*)$/);
     if (ms) { serial = ms[1]; continue; }
     const ma = line.match(/^자산기번\s*:\s*(.*)$/);
     if (ma) { asset = ma[1]; continue; }
+    // A standalone line between the number and 모델명 is the location
+    // (e.g. "1." on its own line followed by "3층").
+    if (collectingLoc && line.trim() && !isDividerLine(line) && !FIELD_MARKER_REGEX.test(line)) {
+      location = location ? `${location} ${line.trim()}` : line.trim();
+    }
   }
   flush();
   return labels;
@@ -2329,15 +2314,14 @@ function applyAirPurifierForm(text: string, f: AirPurifierForm, author: string):
   }).join("\n");
 }
 
-const TONER_OPTIONS = ["10", "20", "30", "40", "50", "60", "70", "80", "90", "100"];
 const WASTE_OPTIONS = ["10", "20", "30", "40", "50", "60", "70", "80", "90", "100"];
-const SPARE_OPTIONS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const HANTIN_OPTIONS = ["한공", "한조", "한조해지업체", "보안으로 설치불가", "고객불편으로 설치불가", "무"];
 const PARKING_OPTIONS = ["유", "무"];
 const SHIP_OPTIONS = ["출고부탁드립니다", "선출고완료"];
 const HOUR_OPTIONS = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"];
 const MINUTE_OPTIONS = ["00", "10", "20", "30", "40", "50"];
 const DURATION_STEPS = [1, 5, 10, 30, 60];
+const TONER_STEPS = [1, 5, 10, 50, 100];
 const LEVEL_OPTIONS = ["1", "2", "3", "4", "5"];
 const YESNO_OPTIONS = ["유", "무"];
 
@@ -2548,27 +2532,6 @@ function AuthorPicker({ value, onChange, accent }: AuthorPickerProps) {
   );
 }
 
-type FormFieldRowProps = {
-  label: string;
-  dotColor?: string;
-  children: ReactNode;
-};
-
-function FieldRow({ label, dotColor, children }: FormFieldRowProps) {
-  return (
-    <div className="flex items-center gap-1.5 py-1">
-      {dotColor && (
-        <span
-          className="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-slate-300"
-          style={{ background: dotColor }}
-        />
-      )}
-      <span className="w-5 shrink-0 text-xs font-semibold text-slate-600">{label}</span>
-      <div className="min-w-0 flex-1">{children}</div>
-    </div>
-  );
-}
-
 type ProcessingFormPanelProps = {
   itemForm: PerItemForm;
   setItemF: <K extends keyof PerItemForm>(key: K, value: PerItemForm[K]) => void;
@@ -2585,7 +2548,6 @@ type ProcessingFormPanelProps = {
   setAuthor: (v: string) => void;
   showLevel: boolean;
   showHantinParking: boolean;
-  showDrum: boolean;
 };
 
 function ProcessingFormPanel({
@@ -2593,7 +2555,7 @@ function ProcessingFormPanel({
   shared, setSharedF,
   itemCount, itemLabels, selectedItem, setSelectedItem,
   accent, bgSoft,
-  author, setAuthor, showLevel, showHantinParking, showDrum,
+  author, setAuthor, showLevel, showHantinParking,
 }: ProcessingFormPanelProps) {
   const [partsExpanded, setPartsExpanded] = useState(false);
   const [selfExpanded, setSelfExpanded] = useState(false);
@@ -2701,22 +2663,50 @@ function ProcessingFormPanel({
         </div>
       </div>
 
-      {/* 토너잔량 */}
+      {/* 토너잔량 — 누적 버튼 (값 위에 +N) */}
       <div className="mb-2 rounded-xl p-2" style={{ background: bgSoft }}>
         <div className="mb-1 text-xs font-semibold text-slate-700">토너잔량 (%)</div>
-        <div className="grid grid-cols-2 gap-x-2">
-          <FieldRow label="K" dotColor={TONER_COLORS.K}>
-            <NumSelect value={itemForm.tonerK} onChange={(v) => setItemF("tonerK", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
-          </FieldRow>
-          <FieldRow label="C" dotColor={TONER_COLORS.C}>
-            <NumSelect value={itemForm.tonerC} onChange={(v) => setItemF("tonerC", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
-          </FieldRow>
-          <FieldRow label="M" dotColor={TONER_COLORS.M}>
-            <NumSelect value={itemForm.tonerM} onChange={(v) => setItemF("tonerM", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
-          </FieldRow>
-          <FieldRow label="Y" dotColor={TONER_COLORS.Y}>
-            <NumSelect value={itemForm.tonerY} onChange={(v) => setItemF("tonerY", v)} options={TONER_OPTIONS} accent={accent} suffix="%" />
-          </FieldRow>
+        <div className="space-y-1.5">
+          {(["K", "C", "M", "Y"] as const).map((ch: "K" | "C" | "M" | "Y") => {
+            const key = (`toner${ch}`) as "tonerK" | "tonerC" | "tonerM" | "tonerY";
+            const val = itemForm[key];
+            return (
+              <div key={ch}>
+                <div className="mb-0.5 flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-slate-300"
+                    style={{ background: TONER_COLORS[ch] }}
+                  />
+                  <span className="w-4 shrink-0 text-xs font-semibold text-slate-600">{ch}</span>
+                  <span className="text-sm font-bold" style={{ color: accent }}>{val ? `${val}%` : "0%"}</span>
+                  {val && (
+                    <button
+                      type="button"
+                      onClick={() => setItemF(key, "")}
+                      className="ml-auto rounded-md bg-white px-2 py-0.5 text-[11px] text-slate-500 active:scale-95"
+                    >
+                      초기화
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-5 gap-1">
+                  {TONER_STEPS.map((step: number) => (
+                    <button
+                      key={step}
+                      type="button"
+                      onClick={() => {
+                        const cur = parseInt(val || "0", 10) || 0;
+                        setItemF(key, String(Math.min(100, cur + step)));
+                      }}
+                      className="rounded-lg bg-white py-2 text-xs font-semibold text-slate-700 transition active:scale-95"
+                    >
+                      +{step}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -2726,57 +2716,16 @@ function ProcessingFormPanel({
         <NumSelect value={itemForm.waste} onChange={(v) => setItemF("waste", v)} options={WASTE_OPTIONS} accent={accent} suffix="%" />
       </div>
 
-      {/* 여분 */}
+      {/* 여분 — 원본 그대로 직접 수정 */}
       <div className="mb-2 rounded-xl p-2" style={{ background: bgSoft }}>
-        <div className="mb-1 flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-700">여분</span>
-          <span className="text-[10px] text-slate-500">전체 한번에 설정</span>
-        </div>
-        <div className="mb-1.5">
-          <FieldRow label="전">
-            <NumSelect
-              value={itemForm.spareShared ? "공용" : ""}
-              onChange={(v) => {
-                if (!v) return;
-                if (v === "공용") {
-                  setItemF("spareShared", "공용");
-                  return;
-                }
-                setItemF("spareShared", "");
-                setItemF("spareK", v);
-                setItemF("spareC", v);
-                setItemF("spareM", v);
-                setItemF("spareY", v);
-                setItemF("spareWaste", v);
-              }}
-              options={[...SPARE_OPTIONS, "공용"]}
-              placeholder="일괄/공용"
-              accent={accent}
-            />
-          </FieldRow>
-        </div>
-        <div className="grid grid-cols-2 gap-x-2">
-          <FieldRow label="K" dotColor={TONER_COLORS.K}>
-            <NumSelect value={itemForm.spareK} onChange={(v) => setItemF("spareK", v)} options={SPARE_OPTIONS} accent={accent} />
-          </FieldRow>
-          <FieldRow label="C" dotColor={TONER_COLORS.C}>
-            <NumSelect value={itemForm.spareC} onChange={(v) => setItemF("spareC", v)} options={SPARE_OPTIONS} accent={accent} />
-          </FieldRow>
-          <FieldRow label="M" dotColor={TONER_COLORS.M}>
-            <NumSelect value={itemForm.spareM} onChange={(v) => setItemF("spareM", v)} options={SPARE_OPTIONS} accent={accent} />
-          </FieldRow>
-          <FieldRow label="Y" dotColor={TONER_COLORS.Y}>
-            <NumSelect value={itemForm.spareY} onChange={(v) => setItemF("spareY", v)} options={SPARE_OPTIONS} accent={accent} />
-          </FieldRow>
-        </div>
-        <FieldRow label="폐">
-          <NumSelect value={itemForm.spareWaste} onChange={(v) => setItemF("spareWaste", v)} options={SPARE_OPTIONS} accent={accent} />
-        </FieldRow>
-        {showDrum && (
-          <FieldRow label="드럼">
-            <NumSelect value={itemForm.spareDrum} onChange={(v) => setItemF("spareDrum", v)} options={SPARE_OPTIONS} accent={accent} />
-          </FieldRow>
-        )}
+        <div className="mb-1 text-xs font-semibold text-slate-700">여분</div>
+        <textarea
+          value={itemForm.spareRaw}
+          onChange={(e) => setItemF("spareRaw", e.target.value)}
+          rows={2}
+          placeholder="예: K-2 C-1 M-1 Y-1 폐-1 / 1set, 폐1 / 공용"
+          className="w-full resize-y rounded-lg bg-white p-2 font-mono text-xs outline-none"
+        />
       </div>
 
       {showHantinParking && (
@@ -3147,19 +3096,30 @@ function AirPurifierFormPanel({
 // ────────────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [mode, setMode] = useState<Mode>("inspection");
-  const [inputText, setInputText] = useState<string>("");
-  const [textOutput, setTextOutput] = useState<string>("");
-  const [listOutput, setListOutput] = useState<ResultItem[]>([]);
+  // Restore the previous working session so leaving/returning (or a stray
+  // tap) doesn't wipe everything that was being entered.
+  const [savedSession] = useState<Record<string, unknown> | null>(() => {
+    try { return JSON.parse(localStorage.getItem("session_v1") || "null"); } catch { return null; }
+  });
+  const ss = savedSession ?? {};
+
+  const [mode, setMode] = useState<Mode>((ss.mode as Mode) ?? "inspection");
+  const [inputText, setInputText] = useState<string>((ss.inputText as string) ?? "");
+  const [textOutput, setTextOutput] = useState<string>((ss.textOutput as string) ?? "");
+  const [listOutput, setListOutput] = useState<ResultItem[]>((ss.listOutput as ResultItem[]) ?? []);
   const [toast, setToast] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [itemForms, setItemForms] = useState<PerItemForm[]>([EMPTY_ITEM_FORM]);
-  const [sharedForm, setSharedForm] = useState<SharedForm>(EMPTY_SHARED_FORM);
-  const [selectedItem, setSelectedItem] = useState<number>(0);
+  const [itemForms, setItemForms] = useState<PerItemForm[]>((ss.itemForms as PerItemForm[]) ?? [EMPTY_ITEM_FORM]);
+  const [sharedForm, setSharedForm] = useState<SharedForm>((ss.sharedForm as SharedForm) ?? EMPTY_SHARED_FORM);
+  const [selectedItem, setSelectedItem] = useState<number>((ss.selectedItem as number) ?? 0);
   const [previewOpen, setPreviewOpen] = useState<boolean>(true);
-  const [airForm, setAirForm] = useState<AirPurifierForm>(EMPTY_AIR_FORM);
-  const [editedContents, setEditedContents] = useState<Record<number, string>>({});
-  const [editedTextOutput, setEditedTextOutput] = useState<string | null>(null);
+  const [airForm, setAirForm] = useState<AirPurifierForm>((ss.airForm as AirPurifierForm) ?? EMPTY_AIR_FORM);
+  const [editedContents, setEditedContents] = useState<Record<number, string>>((ss.editedContents as Record<number, string>) ?? {});
+  const [editedTextOutput, setEditedTextOutput] = useState<string | null>((ss.editedTextOutput as string | null) ?? null);
+
+  // On a restored session, skip the first auto-transform so it doesn't
+  // re-parse and overwrite the restored form edits.
+  const skipAutoRef = useRef<boolean>(Boolean(savedSession && ss.inputText));
 
   const [author, setAuthor] = useState<string>(() => {
     try { return localStorage.getItem("author") || ""; } catch { return ""; }
@@ -3307,6 +3267,10 @@ export default function App() {
   // Auto-transform on input or mode change (debounced)
   useEffect(() => {
     const handle = window.setTimeout(() => {
+      if (skipAutoRef.current) {
+        skipAutoRef.current = false;
+        return;
+      }
       if (!inputText.trim()) {
         resetOutputs();
         setItemForms([{ ...EMPTY_ITEM_FORM }]);
@@ -3318,6 +3282,21 @@ export default function App() {
     }, 200);
     return () => window.clearTimeout(handle);
   }, [inputText, mode]);
+
+  // Persist the working session (debounced) so it survives reloads.
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      try {
+        localStorage.setItem("session_v1", JSON.stringify({
+          mode, inputText, textOutput, listOutput, itemForms, sharedForm,
+          selectedItem, editedContents, editedTextOutput, airForm,
+        }));
+      } catch {
+        // ignore quota / private mode errors
+      }
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [mode, inputText, textOutput, listOutput, itemForms, sharedForm, selectedItem, editedContents, editedTextOutput, airForm]);
 
   const handlePaste = async () => {
     const text = await pasteFromClipboard();
@@ -3361,6 +3340,7 @@ export default function App() {
     setSharedForm(EMPTY_SHARED_FORM);
     setSelectedItem(0);
     setAirForm(EMPTY_AIR_FORM);
+    try { localStorage.removeItem("session_v1"); } catch { /* ignore */ }
     showToast("초기화 완료");
   };
 
@@ -3442,39 +3422,6 @@ export default function App() {
             style={{ borderColor: config.accent }}
           />
         </section>
-
-        {/* Processing form — 미양식 + 점검 */}
-        {showForm && (
-          <ProcessingFormPanel
-            itemForm={currentItemForm}
-            setItemF={setItemF}
-            toggleItemF={toggleItemF}
-            shared={sharedForm}
-            setSharedF={setSharedF}
-            itemCount={itemForms.length}
-            itemLabels={itemLabels}
-            selectedItem={selectedItem}
-            setSelectedItem={setSelectedItem}
-            accent={config.accent}
-            bgSoft={config.bgSoft}
-            author={author}
-            setAuthor={setAuthor}
-            showLevel={mode === "blank-report"}
-            showHantinParking={mode === "blank-report"}
-            showDrum={mode === "inspection" || mode === "blank-report"}
-          />
-        )}
-
-        {/* Air purifier form — only for 청정기 */}
-        {showAirForm && (
-          <AirPurifierFormPanel
-            form={airForm}
-            setAirF={setAirF}
-            accent={config.accent}
-            author={author}
-            setAuthor={setAuthor}
-          />
-        )}
 
         {/* Results */}
         {hasOutput && (
@@ -3578,6 +3525,38 @@ export default function App() {
           </section>
         )}
 
+        {/* Processing form — 미양식 + 점검 */}
+        {showForm && (
+          <ProcessingFormPanel
+            itemForm={currentItemForm}
+            setItemF={setItemF}
+            toggleItemF={toggleItemF}
+            shared={sharedForm}
+            setSharedF={setSharedF}
+            itemCount={itemForms.length}
+            itemLabels={itemLabels}
+            selectedItem={selectedItem}
+            setSelectedItem={setSelectedItem}
+            accent={config.accent}
+            bgSoft={config.bgSoft}
+            author={author}
+            setAuthor={setAuthor}
+            showLevel={mode === "blank-report"}
+            showHantinParking={mode === "blank-report"}
+          />
+        )}
+
+        {/* Air purifier form — only for 청정기 */}
+        {showAirForm && (
+          <AirPurifierFormPanel
+            form={airForm}
+            setAirF={setAirF}
+            accent={config.accent}
+            author={author}
+            setAuthor={setAuthor}
+          />
+        )}
+
         {/* Dev-only test panel */}
         {isDev && testResults.length > 0 && (
           <section className="mb-3 rounded-2xl bg-white p-3 shadow-sm">
@@ -3643,13 +3622,6 @@ export default function App() {
             aria-label="초기화"
           >
             초기화
-          </button>
-          <button
-            onClick={handleTransform}
-            className="shrink-0 rounded-xl px-5 py-3 text-sm font-semibold text-white transition active:scale-[0.98]"
-            style={{ background: config.accent }}
-          >
-            ⚡ 변환
           </button>
           <button
             onClick={handleCopyAll}
