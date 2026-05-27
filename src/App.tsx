@@ -3111,6 +3111,7 @@ export default function App() {
   // Manual edits live per result block (keyed by block index) and are
   // transient (not persisted) so a stale override never blocks the form.
   const [editedBlocks, setEditedBlocks] = useState<Record<number, string>>({});
+  const [helpOpen, setHelpOpen] = useState<boolean>(false);
 
 
   // On a restored session, skip the first auto-transform so it doesn't
@@ -3366,7 +3367,18 @@ export default function App() {
               <span style={{ color: config.accent }}>●</span> {config.label} 모드
             </p>
           </div>
-          <div className="text-xs text-slate-400">{lineStats}</div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">{lineStats}</span>
+            <button
+              type="button"
+              onClick={() => setHelpOpen(true)}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold text-white"
+              style={{ background: config.accent }}
+              aria-label="사용 설명서"
+            >
+              ?
+            </button>
+          </div>
         </header>
 
         {/* Mode tabs - segmented control */}
@@ -3538,6 +3550,85 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      {/* 사용 설명서 */}
+      {helpOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end bg-black/50 sm:items-center sm:justify-center"
+          onClick={() => setHelpOpen(false)}
+        >
+          <div
+            className="max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-white sm:max-w-lg sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3">
+              <span className="text-sm font-bold text-slate-800">사용 설명서</span>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(false)}
+                className="rounded-md px-3 py-1 text-sm font-semibold text-white"
+                style={{ background: config.accent }}
+              >
+                닫기
+              </button>
+            </div>
+            <div className="space-y-4 px-4 py-4 text-sm leading-relaxed text-slate-700">
+              <div>
+                <div className="font-bold text-slate-900">이 앱은 뭐 하나요?</div>
+                <p>복사해온 점검/접수 내용을 깔끔한 보고 양식으로 자동으로 바꿔줍니다. 결과를 복사해 메신저에 붙여넣으면 끝이에요.</p>
+              </div>
+
+              <div className="rounded-xl bg-slate-50 p-3">
+                <div className="mb-1 font-bold text-slate-900">기본 순서 (이것만 기억!)</div>
+                <ol className="ml-4 list-decimal space-y-1">
+                  <li>맨 위에서 <b>탭</b> 고르기</li>
+                  <li><b>원본 입력</b> 칸에 붙여넣기 → 자동으로 결과가 만들어져요</li>
+                  <li><b>작성자</b> 고르고, 빈 칸 채우기</li>
+                  <li>맨 아래 <b>결과</b> 확인 (필요하면 직접 고치기)</li>
+                  <li>맨 아래 <b>📋 복사</b> → 메신저에 붙여넣기</li>
+                </ol>
+              </div>
+
+              <div>
+                <div className="font-bold text-slate-900">탭 4가지</div>
+                <ul className="ml-4 list-disc space-y-0.5">
+                  <li><b>점검</b> : 복합기/프린터 점검 (여러 대 가능)</li>
+                  <li><b>미양식</b> : 양식 없는 접수 글 정리 (보통 1대)</li>
+                  <li><b>청정기</b> : 공기청정기 점검</li>
+                  <li><b>삼성노트</b> : 스케줄 제목 번호 정리</li>
+                </ul>
+              </div>
+
+              <div>
+                <div className="font-bold text-slate-900">칸 채우기</div>
+                <ul className="ml-4 list-disc space-y-0.5">
+                  <li><b>작성자</b> : 칸을 누르면 팀별 이름이 나와요. 내 이름 선택 (다음에도 기억함)</li>
+                  <li><b>매수 / 잔량</b> : 숫자를 직접 적기</li>
+                  <li><b>여분</b> : 원래 내용이 들어와 있으니 숫자만 고치면 돼요</li>
+                  <li><b>한틴이카 / 주차비</b> : 단추로 빠르게 고르거나 직접 적기</li>
+                  <li><b>부품·자가신청</b> : 평소엔 접혀 있어요. 필요할 때 “펼치기 ▼”</li>
+                  <li>칸을 채우면 아래 결과가 바로바로 바뀝니다</li>
+                </ul>
+              </div>
+
+              <div>
+                <div className="font-bold text-slate-900">기기가 여러 대일 때 (점검)</div>
+                <p>폼 위쪽 <b>“기기 선택”</b>에서 기기를 고르면, 아래 결과도 그 기기로 따라가요. 기기를 바꿔가며 각각 채우면 됩니다. (먼저 채운 건 그대로 저장돼요.)</p>
+              </div>
+
+              <div>
+                <div className="font-bold text-slate-900">결과 / 복사</div>
+                <p>화면 맨 아래 <b>결과 칸</b>은 위아래로 넘겨 볼 수 있고, 글자를 직접 고칠 수도 있어요. 다 됐으면 <b>📋 복사</b> 누르고 메신저에 붙여넣기!</p>
+              </div>
+
+              <div>
+                <div className="font-bold text-slate-900">안심하세요</div>
+                <p>적던 내용은 <b>자동 저장</b>돼요. 앱을 닫았다 와도 그대로 있어요. 처음부터 다시 하려면 <b>초기화</b>를 누르세요.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
