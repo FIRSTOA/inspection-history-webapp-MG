@@ -3208,10 +3208,15 @@ export default function App() {
   const blockJoiner = mode === "inspection" ? "\n" : "\n\n";
 
   const deviceBlockRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const resultScrollRef = useRef<HTMLDivElement | null>(null);
+  // Scroll the result panel to the selected device — only when the device
+  // selection changes, and only within the panel (never the page), so
+  // typing in form fields doesn't make the screen jump.
   useEffect(() => {
+    const container = resultScrollRef.current;
     const el = deviceBlockRefs.current[selectedItem];
-    if (el) el.scrollIntoView({ block: "nearest" });
-  }, [selectedItem, resultBlocks]);
+    if (container && el) container.scrollTop = el.offsetTop - container.offsetTop;
+  }, [selectedItem]);
 
   const lineStats = useMemo(() => {
     const count = inputText ? inputText.split(/\r?\n/).length : 0;
@@ -3353,7 +3358,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className={`mx-auto flex max-w-3xl flex-col px-3 pt-4 sm:px-6 sm:pt-6 ${hasOutput && resultOpen ? "pb-[42vh]" : "pb-28"}`}>
+      <div className={`mx-auto flex max-w-3xl flex-col px-3 pt-4 sm:px-6 sm:pt-6 ${hasOutput && resultOpen ? "pb-[34vh]" : "pb-28"}`}>
         {/* Header */}
         <header className="mb-4 flex items-center justify-between">
           <div>
@@ -3507,7 +3512,7 @@ export default function App() {
               </button>
             </div>
             {resultOpen && (
-              <div className="space-y-1.5 overflow-y-auto pb-2" style={{ maxHeight: "30vh" }}>
+              <div ref={resultScrollRef} className="relative space-y-1.5 overflow-y-auto pb-2" style={{ maxHeight: "22vh" }}>
                 {resultBlocks.map((block: ResultBlock, i: number) => {
                   const active = block.device !== null && block.device === selectedItem;
                   const text = editedBlocks[i] ?? block.text;
