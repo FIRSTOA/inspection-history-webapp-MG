@@ -3584,6 +3584,13 @@ export default function App() {
               </button>
               <button
                 type="button"
+                onClick={() => setDraftInput("")}
+                className="rounded-xl border border-rose-200 px-4 py-2.5 text-sm font-medium text-rose-500"
+              >
+                초기화
+              </button>
+              <button
+                type="button"
                 onClick={confirmInputModal}
                 className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white"
                 style={{ background: config.accent }}
@@ -3602,72 +3609,112 @@ export default function App() {
           onClick={() => setHelpOpen(false)}
         >
           <div
-            className="max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-white sm:max-w-lg sm:rounded-2xl"
+            className="max-h-[88vh] w-full overflow-y-auto rounded-t-2xl bg-slate-50 sm:max-w-lg sm:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3">
-              <span className="text-sm font-bold text-slate-800">사용 설명서</span>
+            {/* 헤더 */}
+            <div
+              className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 text-white"
+              style={{ background: config.accent }}
+            >
+              <div>
+                <div className="text-base font-bold">사용 설명서</div>
+                <div className="text-xs opacity-80">처음이어도 그대로 따라 하면 돼요</div>
+              </div>
               <button
                 type="button"
                 onClick={() => setHelpOpen(false)}
-                className="rounded-md px-3 py-1 text-sm font-semibold text-white"
-                style={{ background: config.accent }}
+                className="rounded-full bg-white/20 px-3 py-1 text-sm font-semibold"
               >
-                닫기
+                닫기 ✕
               </button>
             </div>
-            <div className="space-y-4 px-4 py-4 text-sm leading-relaxed text-slate-700">
-              <div>
-                <div className="font-bold text-slate-900">이 앱은 뭐 하나요?</div>
-                <p>복사해온 점검/접수 내용을 깔끔한 보고 양식으로 자동으로 바꿔줍니다. 결과를 복사해 메신저에 붙여넣으면 끝이에요.</p>
+
+            <div className="space-y-3 p-4">
+              {/* 한 줄 소개 */}
+              <div className="rounded-2xl bg-white p-4 text-center text-sm text-slate-600 shadow-sm">
+                복사한 점검 내용을 <b style={{ color: config.accent }}>깔끔한 보고 양식</b>으로<br />
+                자동으로 바꿔주는 앱이에요 📄
               </div>
 
-              <div className="rounded-xl bg-slate-50 p-3">
-                <div className="mb-1 font-bold text-slate-900">기본 순서 (이것만 기억!)</div>
-                <ol className="ml-4 list-decimal space-y-1">
-                  <li>맨 위에서 <b>탭</b> 고르기</li>
-                  <li><b>원본 붙여넣기</b> 버튼 → 팝업에 붙여넣고 <b>확인</b> → 결과가 만들어져요</li>
-                  <li><b>작성자</b> 고르고, 빈 칸 채우기</li>
-                  <li>맨 아래 <b>결과</b> 확인 (필요하면 직접 고치기)</li>
-                  <li>맨 아래 <b>📋 복사</b> → 메신저에 붙여넣기</li>
-                </ol>
+              {/* 기본 순서 - 스텝 배지 */}
+              <div className="rounded-2xl bg-white p-4 shadow-sm">
+                <div className="mb-3 text-sm font-bold text-slate-900">⭐ 기본 순서 (이것만 기억!)</div>
+                <div className="space-y-2.5">
+                  {[
+                    ["맨 위에서 ", "탭", " 고르기"],
+                    ["", "원본 붙여넣기", " → 팝업에 붙여넣고 확인"],
+                    ["", "작성자", " 고르고 빈 칸 채우기"],
+                    ["맨 아래 ", "결과", " 확인 (직접 고쳐도 됨)"],
+                    ["", "📋 복사", " → 메신저에 붙여넣기"],
+                  ].map((parts: string[], idx: number) => (
+                    <div key={idx} className="flex items-center gap-3">
+                      <span
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                        style={{ background: config.accent }}
+                      >
+                        {idx + 1}
+                      </span>
+                      <span className="text-sm text-slate-700">
+                        {parts[0]}<b className="text-slate-900">{parts[1]}</b>{parts[2]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              <div>
-                <div className="font-bold text-slate-900">탭 4가지</div>
-                <ul className="ml-4 list-disc space-y-0.5">
-                  <li><b>점검</b> : 복합기/프린터 점검 (여러 대 가능)</li>
-                  <li><b>미양식</b> : 양식 없는 접수 글 정리 (보통 1대)</li>
-                  <li><b>청정기</b> : 공기청정기 점검</li>
-                  <li><b>삼성노트</b> : 스케줄 제목 번호 정리</li>
+              {/* 탭 4가지 */}
+              <div className="rounded-2xl bg-white p-4 shadow-sm">
+                <div className="mb-2 text-sm font-bold text-slate-900">🗂️ 탭 4가지</div>
+                <div className="space-y-1.5 text-sm text-slate-700">
+                  <div><b className="text-slate-900">점검</b> — 복합기/프린터 점검 (여러 대 가능)</div>
+                  <div><b className="text-slate-900">미양식</b> — 양식 없는 접수 글 정리 (보통 1대)</div>
+                  <div><b className="text-slate-900">청정기</b> — 공기청정기 점검</div>
+                  <div><b className="text-slate-900">삼성노트</b> — 스케줄 제목 번호 정리</div>
+                </div>
+              </div>
+
+              {/* 칸 채우기 */}
+              <div className="rounded-2xl bg-white p-4 shadow-sm">
+                <div className="mb-2 text-sm font-bold text-slate-900">✏️ 칸 채우기</div>
+                <ul className="space-y-1.5 text-sm text-slate-700">
+                  <li>• <b className="text-slate-900">작성자</b> : 탭하면 팀별 이름 → 내 이름 선택 (기억됨)</li>
+                  <li>• <b className="text-slate-900">매수 / 잔량</b> : 숫자 직접 입력</li>
+                  <li>• <b className="text-slate-900">여분</b> : 원래 내용이 들어와 있어 숫자만 고치면 됨</li>
+                  <li>• <b className="text-slate-900">한틴이카 / 주차비</b> : 단추로 고르거나 직접 입력</li>
+                  <li>• <b className="text-slate-900">부품·자가신청</b> : 평소 접힘, 필요할 때 “펼치기 ▼”</li>
                 </ul>
+                <div className="mt-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-500">
+                  💡 칸을 채우면 아래 결과가 바로바로 바뀝니다.
+                </div>
               </div>
 
-              <div>
-                <div className="font-bold text-slate-900">칸 채우기</div>
-                <ul className="ml-4 list-disc space-y-0.5">
-                  <li><b>작성자</b> : 칸을 누르면 팀별 이름이 나와요. 내 이름 선택 (다음에도 기억함)</li>
-                  <li><b>매수 / 잔량</b> : 숫자를 직접 적기</li>
-                  <li><b>여분</b> : 원래 내용이 들어와 있으니 숫자만 고치면 돼요</li>
-                  <li><b>한틴이카 / 주차비</b> : 단추로 빠르게 고르거나 직접 적기</li>
-                  <li><b>부품·자가신청</b> : 평소엔 접혀 있어요. 필요할 때 “펼치기 ▼”</li>
-                  <li>칸을 채우면 아래 결과가 바로바로 바뀝니다</li>
-                </ul>
+              {/* 기기 여러 대 */}
+              <div className="rounded-2xl bg-white p-4 shadow-sm">
+                <div className="mb-2 text-sm font-bold text-slate-900">🖨️ 기기가 여러 대일 때 (점검)</div>
+                <p className="text-sm leading-relaxed text-slate-700">
+                  폼 위쪽 <b className="text-slate-900">“기기 선택”</b>에서 기기를 고르면 아래 결과도 그 기기로 따라가요.
+                  기기를 바꿔가며 채우면 되고, 먼저 채운 건 그대로 저장돼요.
+                </p>
               </div>
 
-              <div>
-                <div className="font-bold text-slate-900">기기가 여러 대일 때 (점검)</div>
-                <p>폼 위쪽 <b>“기기 선택”</b>에서 기기를 고르면, 아래 결과도 그 기기로 따라가요. 기기를 바꿔가며 각각 채우면 됩니다. (먼저 채운 건 그대로 저장돼요.)</p>
+              {/* 결과/복사 */}
+              <div className="rounded-2xl bg-white p-4 shadow-sm">
+                <div className="mb-2 text-sm font-bold text-slate-900">📋 결과 / 복사</div>
+                <p className="text-sm leading-relaxed text-slate-700">
+                  맨 아래 <b className="text-slate-900">결과 칸</b>은 위아래로 넘겨 보고, 글자를 직접 고칠 수도 있어요.
+                  다 됐으면 <b className="text-slate-900">복사</b> 누르고 메신저에 붙여넣기!
+                </p>
               </div>
 
-              <div>
-                <div className="font-bold text-slate-900">결과 / 복사</div>
-                <p>화면 맨 아래 <b>결과 칸</b>은 위아래로 넘겨 볼 수 있고, 글자를 직접 고칠 수도 있어요. 다 됐으면 <b>📋 복사</b> 누르고 메신저에 붙여넣기!</p>
-              </div>
-
-              <div>
-                <div className="font-bold text-slate-900">안심하세요</div>
-                <p>적던 내용은 <b>자동 저장</b>돼요. 앱을 닫았다 와도 그대로 있어요. 처음부터 다시 하려면 <b>초기화</b>를 누르세요.</p>
+              {/* 자동 저장 */}
+              <div
+                className="rounded-2xl p-4 text-sm leading-relaxed"
+                style={{ background: config.bgSoft, color: config.textDark }}
+              >
+                <b>🔒 안심하세요</b><br />
+                적던 내용은 자동 저장돼요. 앱을 닫았다 와도 그대로 있어요.
+                처음부터 다시 하려면 <b>초기화</b>를 누르세요.
               </div>
             </div>
           </div>
