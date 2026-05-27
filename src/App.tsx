@@ -2669,40 +2669,40 @@ function ProcessingFormPanel({
         </div>
       </div>
 
-      {/* 토너잔량 — 직접 입력 (K/C/M/Y) */}
+      {/* 잔량 — K/C/M/Y + 폐통, 직접 입력 (5칸) */}
       <div className="mb-2 rounded-xl p-2" style={{ background: bgSoft }}>
-        <div className="mb-1 text-xs font-semibold text-slate-700">토너잔량 (%)</div>
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="mb-1 text-xs font-semibold text-slate-700">잔량 (%)</div>
+        <div className="grid grid-cols-5 gap-1">
           {(["K", "C", "M", "Y"] as const).map((ch: "K" | "C" | "M" | "Y") => {
             const key = (`toner${ch}`) as "tonerK" | "tonerC" | "tonerM" | "tonerY";
             return (
-              <div key={ch} className="flex items-center gap-1">
-                <span
-                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-slate-300"
-                  style={{ background: TONER_COLORS[ch] }}
-                />
-                <span className="shrink-0 text-xs font-semibold text-slate-600">{ch}</span>
+              <div key={ch}>
+                <div className="mb-0.5 flex items-center justify-center gap-0.5">
+                  <span
+                    className="inline-block h-2 w-2 shrink-0 rounded-full ring-1 ring-slate-300"
+                    style={{ background: TONER_COLORS[ch] }}
+                  />
+                  <span className="text-[11px] font-semibold text-slate-600">{ch}</span>
+                </div>
                 <input
                   inputMode="numeric"
                   value={itemForm[key]}
                   onChange={(e) => setItemF(key, e.target.value)}
-                  className="w-full min-w-0 rounded-lg bg-white px-1.5 py-1.5 text-sm outline-none"
+                  className="w-full min-w-0 rounded-lg bg-white px-1 py-1.5 text-center text-sm outline-none"
                 />
               </div>
             );
           })}
+          <div>
+            <div className="mb-0.5 text-center text-[11px] font-semibold text-slate-600">폐통</div>
+            <input
+              inputMode="numeric"
+              value={itemForm.waste}
+              onChange={(e) => setItemF("waste", e.target.value)}
+              className="w-full min-w-0 rounded-lg bg-white px-1 py-1.5 text-center text-sm outline-none"
+            />
+          </div>
         </div>
-      </div>
-
-      {/* 폐통 — 직접 입력 */}
-      <div className="mb-2 flex items-center gap-2">
-        <div className="shrink-0 text-xs font-semibold text-slate-700">폐통 (%)</div>
-        <input
-          inputMode="numeric"
-          value={itemForm.waste}
-          onChange={(e) => setItemF("waste", e.target.value)}
-          className="w-24 rounded-lg bg-slate-50 px-2 py-1.5 text-sm outline-none focus:bg-white"
-        />
       </div>
 
       {/* 여분 — 원본 그대로 직접 수정 */}
@@ -3108,8 +3108,9 @@ export default function App() {
   const [airForm, setAirForm] = useState<AirPurifierForm>({ ...EMPTY_AIR_FORM, ...(ss.airForm as Partial<AirPurifierForm> ?? {}) });
   // Manual result edits are transient (not restored) so a stale override
   // can never block the form from driving the result after a reload.
-  const [editedContents, setEditedContents] = useState<Record<number, string>>({});
-  const [editedTextOutput, setEditedTextOutput] = useState<string | null>(null);
+  // Manual edits live per result block (keyed by block index) and are
+  // transient (not persisted) so a stale override never blocks the form.
+  const [editedBlocks, setEditedBlocks] = useState<Record<number, string>>({});
 
   const [resultOpen, setResultOpen] = useState<boolean>(true);
 
@@ -3128,7 +3129,6 @@ export default function App() {
   }, [author]);
 
   const config = MODE_CONFIG[mode];
-  const isListMode = mode === "samsung-note" || mode === "blank-report";
   const showForm = mode === "blank-report" || mode === "inspection";
   const showAirForm = mode === "air-purifier";
 
@@ -3155,8 +3155,6 @@ export default function App() {
     return textOutput;
   }, [mode, textOutput, airForm, itemForms, sharedForm, author]);
 
-  const effectiveTextOutput = editedTextOutput ?? displayedTextOutput;
-
   const currentItemForm = itemForms[selectedItem] ?? EMPTY_ITEM_FORM;
 
   const itemLabels = useMemo(() => {
@@ -3173,8 +3171,7 @@ export default function App() {
   // Form is the source of truth: any form change discards a prior manual
   // result edit so the change is reflected.
   const clearManualEdits = () => {
-    setEditedTextOutput(null);
-    setEditedContents({});
+    setEditedBlocks({});
   };
 
   const setItemF = <K extends keyof PerItemForm>(key: K, value: PerItemForm[K]) => {
@@ -3199,19 +3196,21 @@ export default function App() {
   // Result blocks for the bottom panel, tagged with their device index so
   // selecting a device scrolls its block into view.
   const resultBlocks = useMemo<ResultBlock[]>(() => {
-    if (mode === "inspection") return splitResultBlocks(effectiveTextOutput);
+    if (mode === "inspection") return splitResultBlocks(displayedTextOutput);
     if (mode === "blank-report") {
       return displayedList.map((item: ResultItem, i: number) => ({ text: item.content, device: i }));
     }
-    if (mode === "air-purifier") return effectiveTextOutput ? [{ text: effectiveTextOutput, device: null }] : [];
+    if (mode === "air-purifier") return displayedTextOutput ? [{ text: displayedTextOutput, device: null }] : [];
     if (mode === "samsung-note") return displayedList.map((item: ResultItem) => ({ text: item.content, device: null }));
     return [];
-  }, [mode, effectiveTextOutput, displayedList]);
+  }, [mode, displayedTextOutput, displayedList]);
+
+  const blockJoiner = mode === "inspection" ? "\n" : "\n\n";
 
   const deviceBlockRefs = useRef<Record<number, HTMLDivElement | null>>({});
   useEffect(() => {
     const el = deviceBlockRefs.current[selectedItem];
-    if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (el) el.scrollIntoView({ block: "nearest" });
   }, [selectedItem, resultBlocks]);
 
   const lineStats = useMemo(() => {
@@ -3227,8 +3226,7 @@ export default function App() {
   const resetOutputs = () => {
     setTextOutput("");
     setListOutput([]);
-    setEditedContents({});
-    setEditedTextOutput(null);
+    setEditedBlocks({});
   };
 
   const handleModeChange = (next: Mode) => {
@@ -3259,8 +3257,7 @@ export default function App() {
     }
     setItemForms(nextItemForms);
     setSelectedItem(0);
-    setEditedContents({});
-    setEditedTextOutput(null);
+    setEditedBlocks({});
   };
 
   const handleTransform = () => {
@@ -3317,9 +3314,9 @@ export default function App() {
   };
 
   const handleCopyAll = async () => {
-    const target = isListMode
-      ? displayedList.map((item: ResultItem, i: number) => editedContents[i] ?? item.content).join("\n\n")
-      : effectiveTextOutput;
+    const target = resultBlocks
+      .map((b: ResultBlock, i: number) => editedBlocks[i] ?? b.text)
+      .join(blockJoiner);
 
     if (!target) {
       showToast("복사할 내용이 없어요", "error");
@@ -3356,7 +3353,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className={`mx-auto flex max-w-3xl flex-col px-3 pt-4 sm:px-6 sm:pt-6 ${hasOutput && resultOpen ? "pb-[55vh]" : "pb-28"}`}>
+      <div className={`mx-auto flex max-w-3xl flex-col px-3 pt-4 sm:px-6 sm:pt-6 ${hasOutput && resultOpen ? "pb-[42vh]" : "pb-28"}`}>
         {/* Header */}
         <header className="mb-4 flex items-center justify-between">
           <div>
@@ -3510,24 +3507,30 @@ export default function App() {
               </button>
             </div>
             {resultOpen && (
-              <div className="space-y-1.5 overflow-y-auto pb-2" style={{ maxHeight: "42vh" }}>
+              <div className="space-y-1.5 overflow-y-auto pb-2" style={{ maxHeight: "30vh" }}>
                 {resultBlocks.map((block: ResultBlock, i: number) => {
                   const active = block.device !== null && block.device === selectedItem;
+                  const text = editedBlocks[i] ?? block.text;
                   return (
                     <div
                       key={i}
                       ref={(el) => {
                         if (block.device !== null) deviceBlockRefs.current[block.device] = el;
                       }}
-                      className="rounded-lg p-2"
+                      className="rounded-lg p-1"
                       style={{
                         background: active ? config.bgSoft : "#F8FAFC",
                         borderLeft: `3px solid ${active ? config.accent : "transparent"}`,
                       }}
                     >
-                      <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-snug text-slate-800">
-                        {block.text}
-                      </pre>
+                      <textarea
+                        value={text}
+                        onChange={(e) =>
+                          setEditedBlocks((prev: Record<number, string>) => ({ ...prev, [i]: e.target.value }))
+                        }
+                        rows={Math.max(2, text.split("\n").length)}
+                        className="w-full resize-none bg-transparent p-1 font-mono text-[11px] leading-snug text-slate-800 outline-none"
+                      />
                     </div>
                   );
                 })}
