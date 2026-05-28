@@ -3084,6 +3084,48 @@ function AirPurifierFormPanel({
 // Main component
 // ────────────────────────────────────────────────────────────────────────────
 
+// Prefixes whose lines are owned by the form. When the user types directly
+// into a result block, lines NOT in this set are preserved across subsequent
+// form changes; lines IN this set are re-driven by the form (so the form
+// stays the source of truth for them).
+const FORM_DRIVEN_PREFIXES = new Set<string>([
+  // shared header
+  "작성자", "레벨",
+  // per-item (inspection)
+  "처리내용", "매수", "토너잔량", "폐통", "여분",
+  "한틴이카유무", "주차비지원유무", "특이사항",
+  // shared footer / 부품·자가
+  "보증기간 내 여부",
+  "교체 전 카운터 누적 사용매수", "사용 부품 예상 사용매수",
+  "물품명", "물품", "수량", "출고여부",
+  "도착 시간", "소요 시간",
+  // air-purifier
+  "필터리셋", "필터교체",
+]);
+
+function linePrefix(line: string): string {
+  const t = line.replace(/^\s+/, "");
+  const idx = t.indexOf(":");
+  if (idx === -1) return "";
+  return t.slice(0, idx).trim();
+}
+
+// Merge the user's manual edit of a block with the freshly form-driven base.
+// Lines whose prefix is form-driven take the form's value; every other line
+// keeps the user's text (기기위치, 모델명, 시리얼넘버, 내용, 등급 등).
+function mergeBlockEdit(formBase: string, userEdit: string): string {
+  const baseByPrefix = new Map<string, string>();
+  for (const line of formBase.split("\n")) {
+    const p = linePrefix(line);
+    if (p && FORM_DRIVEN_PREFIXES.has(p)) baseByPrefix.set(p, line);
+  }
+  return userEdit.split("\n").map((line: string) => {
+    const p = linePrefix(line);
+    if (p && baseByPrefix.has(p)) return baseByPrefix.get(p) as string;
+    return line;
+  }).join("\n");
+}
+
 export default function App() {
   // Restore the previous working session so leaving/returning (or a stray
   // tap) doesn't wipe everything that was being entered.
@@ -3175,28 +3217,20 @@ export default function App() {
     return [];
   }, [mode, textOutput, listOutput]);
 
-  // Form is the source of truth: any form change discards a prior manual
-  // result edit so the change is reflected.
-  const clearManualEdits = () => {
-    setEditedBlocks({});
-  };
-
+  // Form changes do NOT discard manual edits; mergeBlockEdit re-applies the
+  // form's values to form-driven lines while preserving everything else.
   const setItemF = <K extends keyof PerItemForm>(key: K, value: PerItemForm[K]) => {
-    clearManualEdits();
     setItemForms((prev: PerItemForm[]) => prev.map((f: PerItemForm, i: number) =>
       i === selectedItem ? { ...f, [key]: value } : f,
     ));
   };
   const setSharedF = <K extends keyof SharedForm>(key: K, value: SharedForm[K]) => {
-    clearManualEdits();
     setSharedForm((prev: SharedForm) => ({ ...prev, [key]: value }));
   };
   const setAirF = <K extends keyof AirPurifierForm>(key: K, value: AirPurifierForm[K]) => {
-    clearManualEdits();
     setAirForm((prev: AirPurifierForm) => ({ ...prev, [key]: value }));
   };
   const handleSetAuthor = (v: string) => {
-    clearManualEdits();
     setAuthor(v);
   };
 
@@ -3330,7 +3364,7 @@ export default function App() {
 
   const handleCopyAll = async () => {
     const target = resultBlocks
-      .map((b: ResultBlock, i: number) => editedBlocks[i] ?? b.text)
+      .map((b: ResultBlock, i: number) => (editedBlocks[i] !== undefined ? mergeBlockEdit(b.text, editedBlocks[i]) : b.text))
       .join(blockJoiner);
 
     if (!target) {
@@ -3502,7 +3536,7 @@ export default function App() {
             <div ref={resultScrollRef} className="relative space-y-1.5 overflow-y-auto pb-2" style={{ maxHeight: "30vh" }}>
                 {resultBlocks.map((block: ResultBlock, i: number) => {
                   const active = block.device !== null && block.device === selectedItem;
-                  const text = editedBlocks[i] ?? block.text;
+                  const text = editedBlocks[i] !== undefined ? mergeBlockEdit(block.text, editedBlocks[i]) : block.text;
                   return (
                     <div
                       key={i}
