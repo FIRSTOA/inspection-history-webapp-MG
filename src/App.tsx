@@ -3107,11 +3107,13 @@ export default function App() {
   const [sharedForm, setSharedForm] = useState<SharedForm>({ ...EMPTY_SHARED_FORM, ...(ss.sharedForm as Partial<SharedForm> ?? {}) });
   const [selectedItem, setSelectedItem] = useState<number>((ss.selectedItem as number) ?? 0);
   const [airForm, setAirForm] = useState<AirPurifierForm>({ ...EMPTY_AIR_FORM, ...(ss.airForm as Partial<AirPurifierForm> ?? {}) });
-  // Manual result edits are transient (not restored) so a stale override
-  // can never block the form from driving the result after a reload.
-  // Manual edits live per result block (keyed by block index) and are
-  // transient (not persisted) so a stale override never blocks the form.
-  const [editedBlocks, setEditedBlocks] = useState<Record<number, string>>({});
+  // Manual result edits live per result block (keyed by block index). They're
+  // persisted so a user's direct fixes (기기위치 / 특이사항 등) survive a reload.
+  // Any form change still calls clearManualEdits() so a stale override can't
+  // block the form from driving the result.
+  const [editedBlocks, setEditedBlocks] = useState<Record<number, string>>(
+    (ss.editedBlocks as Record<number, string>) ?? {},
+  );
   const [helpOpen, setHelpOpen] = useState<boolean>(false);
   const [inputModalOpen, setInputModalOpen] = useState<boolean>(false);
   const [draftInput, setDraftInput] = useState<string>("");
@@ -3292,20 +3294,21 @@ export default function App() {
   }, [inputText, mode]);
 
   // Persist the working session (debounced) so it survives reloads.
-  // inputText and manual result edits are intentionally excluded.
+  // inputText is excluded (popup-only); editedBlocks ARE persisted so the
+  // user's direct result edits don't disappear after leaving and coming back.
   useEffect(() => {
     const handle = window.setTimeout(() => {
       try {
         localStorage.setItem("session_v1", JSON.stringify({
           mode, textOutput, listOutput, itemForms, sharedForm,
-          selectedItem, airForm,
+          selectedItem, airForm, editedBlocks,
         }));
       } catch {
         // ignore quota / private mode errors
       }
     }, 300);
     return () => window.clearTimeout(handle);
-  }, [mode, textOutput, listOutput, itemForms, sharedForm, selectedItem, airForm]);
+  }, [mode, textOutput, listOutput, itemForms, sharedForm, selectedItem, airForm, editedBlocks]);
 
   const openInputModal = () => {
     setDraftInput(inputText);
